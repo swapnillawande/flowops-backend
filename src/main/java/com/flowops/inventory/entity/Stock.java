@@ -1,5 +1,6 @@
 package com.flowops.inventory.entity;
 
+import com.flowops.inventory.exception.StockMovementConflictException;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -47,6 +48,14 @@ public class Stock {
         this.onHand = onHand;
         this.reserved = 0;
         this.createdAt = OffsetDateTime.now(ZoneOffset.UTC);
+    }
+
+    public void changeOnHand(int quantity) {
+        long updated = (long) onHand + quantity;
+        if (updated < reserved || updated > Integer.MAX_VALUE) {
+            throw new StockMovementConflictException("Movement would exceed stock capacity or reduce stock below reserved quantity");
+        }
+        onHand = (int) updated;
     }
 
     public UUID getId() { return id; }

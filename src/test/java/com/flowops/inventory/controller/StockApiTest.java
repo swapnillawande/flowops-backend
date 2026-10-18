@@ -1,5 +1,6 @@
 package com.flowops.inventory.controller;
 
+import com.flowops.inventory.repository.StockMovementRepository;
 import com.flowops.inventory.entity.Stock;
 import com.flowops.inventory.repository.StockRepository;
 import com.flowops.product.entity.Product;
@@ -35,6 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class StockApiTest extends PostgresIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired StockRepository stocks;
+    @Autowired StockMovementRepository movements;
     @Autowired ProductRepository products;
     @Autowired WarehouseRepository warehouses;
     @Autowired JdbcTemplate jdbc;
@@ -45,6 +47,7 @@ class StockApiTest extends PostgresIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        movements.deleteAllInBatch();
         stocks.deleteAllInBatch();
         products.deleteAllInBatch();
         warehouses.deleteAllInBatch();

@@ -1,6 +1,7 @@
 
 package com.flowops.exception;
 
+import com.flowops.inventory.exception.StockMovementConflictException;
 import com.flowops.inventory.exception.DuplicateStockException;
 import com.flowops.inventory.exception.StockNotFoundException;
 import com.flowops.product.exception.DuplicateProductException;
@@ -60,7 +61,7 @@ public class GlobalExceptionHandler {
     }
     
     
-	@ExceptionHandler({DuplicateWarehouseException.class, DuplicateProductException.class, DuplicateStockException.class})
+	@ExceptionHandler({DuplicateWarehouseException.class, DuplicateProductException.class, DuplicateStockException.class, StockMovementConflictException.class})
 	public ResponseEntity<Map<String, String>> handleDuplicate(RuntimeException ex) {
 
 		return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", ex.getMessage()));
