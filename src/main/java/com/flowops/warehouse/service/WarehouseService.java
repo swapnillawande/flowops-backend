@@ -2,6 +2,7 @@
 package com.flowops.warehouse.service;
 
 import com.flowops.warehouse.entity.Warehouse;
+import com.flowops.warehouse.exception.DuplicateWarehouseException;
 import com.flowops.warehouse.exception.WarehouseNotFoundException;
 import com.flowops.warehouse.repository.WarehouseRepository;
 
@@ -31,11 +32,16 @@ public class WarehouseService {
         String normalizedCity = city.trim();
         String normalizedCountry = countryCode.trim().toUpperCase();
 
-        if (warehouseRepository.existsByTenantIdAndNameIgnoreCase(
-                tenantId, normalizedName)) {
-            throw new IllegalArgumentException(
-                    "Warehouse name already exists for this tenant");
-        }
+
+		if (warehouseRepository.existsByTenantIdAndNameIgnoreCase(
+		        tenantId, normalizedName)) {
+		
+		    throw new DuplicateWarehouseException(
+		            "Warehouse name already exists for this tenant: "
+		                    + normalizedName
+		    );
+		}
+
 
         Warehouse warehouse = new Warehouse(
                 tenantId,
