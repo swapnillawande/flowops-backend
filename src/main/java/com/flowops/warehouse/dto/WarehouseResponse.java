@@ -6,6 +6,7 @@ import com.flowops.warehouse.entity.Warehouse;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
+/** Public warehouse fields; persistence details and tenant identifiers stay on the server. */
 public record WarehouseResponse(
     UUID id,
     String name,

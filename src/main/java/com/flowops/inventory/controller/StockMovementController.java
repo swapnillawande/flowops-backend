@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.UUID;
 
+/** Maps receipt/adjustment requests to transactional operations and reports replay status to clients. */
 @RestController
 @RequestMapping("/api/v1/warehouses/{warehouseId}/stock/{productId}/movements")
 public class StockMovementController {

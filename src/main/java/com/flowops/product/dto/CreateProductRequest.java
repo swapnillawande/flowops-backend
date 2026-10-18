@@ -10,6 +10,7 @@ import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import java.util.Locale;
 
+/** Normalizes SKU and name before validation; BigDecimal preserves exact decimal weights. */
 public record CreateProductRequest(
         @NotBlank(message = "SKU is required")
         @Size(max = 64)

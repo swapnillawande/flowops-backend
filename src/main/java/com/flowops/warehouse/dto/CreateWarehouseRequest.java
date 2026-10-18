@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
+/** Validated public input; the service trims names and uppercases the country code before saving. */
 public record CreateWarehouseRequest(
 
     @NotBlank(message = "Name is required")

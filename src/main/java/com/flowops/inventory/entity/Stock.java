@@ -1,6 +1,7 @@
 package com.flowops.inventory.entity;
 
 import com.flowops.inventory.exception.StockMovementConflictException;
+import com.flowops.inventory.exception.ReservationConflictException;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -11,6 +12,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
+/** One product balance: available = onHand - reserved; reserving does not remove physical units. */
 @Entity
 @Table(name = "stock")
 public class Stock {
@@ -50,12 +52,29 @@ public class Stock {
         this.createdAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 
+    /** Caller holds the stock row lock; use long arithmetic to detect integer overflow before casting. */
     public void changeOnHand(int quantity) {
         long updated = (long) onHand + quantity;
         if (updated < reserved || updated > Integer.MAX_VALUE) {
             throw new StockMovementConflictException("Movement would exceed stock capacity or reduce stock below reserved quantity");
         }
         onHand = (int) updated;
+    }
+
+    /** Only free units may be held. The transaction keeps this check atomic with the increment. */
+    public void reserve(int quantity) {
+        if (quantity <= 0 || quantity > getAvailable()) {
+            throw new ReservationConflictException("Insufficient available stock for reservation");
+        }
+        reserved += quantity;
+    }
+
+    /** Return a hold to availability without changing onHand. Invalid releases never silently clamp. */
+    public void releaseReserved(int quantity) {
+        if (quantity <= 0 || quantity > reserved) {
+            throw new ReservationConflictException("Reservation quantity exceeds currently reserved stock");
+        }
+        reserved -= quantity;
     }
 
     public UUID getId() { return id; }

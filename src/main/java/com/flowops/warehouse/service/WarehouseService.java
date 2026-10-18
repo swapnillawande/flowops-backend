@@ -7,14 +7,18 @@ import com.flowops.warehouse.exception.WarehouseNotFoundException;
 import com.flowops.warehouse.repository.WarehouseRepository;
 
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
+/** Warehouse business rules and transaction boundaries; database uniqueness also protects concurrent creates. */
 @Service
 public class WarehouseService {
+    private static final Logger log = LoggerFactory.getLogger(WarehouseService.class);
 
     private final WarehouseRepository warehouseRepository;
 
@@ -51,6 +55,7 @@ public class WarehouseService {
                 normalizedCountry
         );
 
+        log.debug("Warehouse creation prepared: tenantId={} warehouseId={}", tenantId, warehouse.getId());
         return warehouseRepository.save(warehouse);
     }
 

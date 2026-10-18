@@ -9,6 +9,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
+/** Append-only through the API: immutable evidence of a physical quantity change in the same transaction. */
 @Entity
 @Table(name = "stock_movements")
 public class StockMovement {

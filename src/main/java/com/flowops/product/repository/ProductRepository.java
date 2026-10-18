@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+/** Product queries are tenant-scoped; SKU ordering keeps list responses deterministic. */
 public interface ProductRepository extends JpaRepository<Product, UUID> {
     boolean existsByTenantIdAndSku(UUID tenantId, String sku);
     List<Product> findByTenantIdOrderBySkuAsc(UUID tenantId);

@@ -18,6 +18,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.UUID;
 
+/** Opening balances and stock reads. Later quantity changes must use audited movement commands. */
 @RestController
 @RequestMapping("/api/v1/warehouses/{warehouseId}/stock")
 public class StockController {

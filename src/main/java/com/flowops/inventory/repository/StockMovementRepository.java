@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+/** Looks up retry keys and audit history within one tenant-owned stock record. */
 public interface StockMovementRepository extends JpaRepository<StockMovement, UUID> {
     Optional<StockMovement> findByTenantIdAndStockIdAndRequestId(UUID tenantId, UUID stockId, UUID requestId);
     List<StockMovement> findByTenantIdAndStockIdOrderByCreatedAtAscIdAsc(UUID tenantId, UUID stockId);

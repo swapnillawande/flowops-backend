@@ -1,6 +1,10 @@
 
 package com.flowops.exception;
 
+import com.flowops.inventory.exception.ReservationNotFoundException;
+import com.flowops.inventory.exception.ReservationConflictException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.flowops.inventory.exception.StockMovementConflictException;
 import com.flowops.inventory.exception.DuplicateStockException;
 import com.flowops.inventory.exception.StockNotFoundException;
@@ -20,12 +24,15 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.util.Map;
 
+/** Maps expected business failures to stable HTTP errors without exposing database exception details. */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-    @ExceptionHandler({WarehouseNotFoundException.class, ProductNotFoundException.class, StockNotFoundException.class})
+    @ExceptionHandler({WarehouseNotFoundException.class, ProductNotFoundException.class, StockNotFoundException.class, ReservationNotFoundException.class})
     public ResponseEntity<Map<String, String>> handleNotFound(
             RuntimeException ex) {
+        log.debug("Request rejected: exceptionType={}", ex.getClass().getSimpleName());
 
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(Map.of("error", ex.getMessage()));
@@ -61,14 +68,17 @@ public class GlobalExceptionHandler {
     }
     
     
-	@ExceptionHandler({DuplicateWarehouseException.class, DuplicateProductException.class, DuplicateStockException.class, StockMovementConflictException.class})
+	@ExceptionHandler({DuplicateWarehouseException.class, DuplicateProductException.class, DuplicateStockException.class, StockMovementConflictException.class, ReservationConflictException.class})
 	public ResponseEntity<Map<String, String>> handleDuplicate(RuntimeException ex) {
+        log.debug("Request rejected: exceptionType={}", ex.getClass().getSimpleName());
 
 		return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", ex.getMessage()));
 	}
 
 	@ExceptionHandler(DataIntegrityViolationException.class)
 	public ResponseEntity<Map<String, String>> handleDataIntegrity(DataIntegrityViolationException ex) {
+        // Do not log the exception text: SQL constraint messages can contain submitted values.
+        log.warn("Database constraint rejected a request: exceptionType={}", ex.getClass().getSimpleName());
 
 		return ResponseEntity.status(HttpStatus.CONFLICT)
 				.body(Map.of("error", "The request conflicts with an existing database record"));

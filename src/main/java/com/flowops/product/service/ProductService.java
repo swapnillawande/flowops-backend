@@ -6,13 +6,17 @@ import com.flowops.product.exception.DuplicateProductException;
 import com.flowops.product.exception.ProductNotFoundException;
 import com.flowops.product.repository.ProductRepository;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
 
+/** Catalog operations; the transaction commits product changes before returning to the HTTP controller. */
 @Service
 public class ProductService {
+    private static final Logger log = LoggerFactory.getLogger(ProductService.class);
     private final ProductRepository repository;
 
     public ProductService(ProductRepository repository) {
@@ -25,7 +29,9 @@ public class ProductService {
             throw new DuplicateProductException(request.sku());
         }
         // The database unique constraint also protects concurrent submissions.
-        return repository.save(new Product(tenantId, request.sku(), request.name(), request.weightKg()));
+        Product product = new Product(tenantId, request.sku(), request.name(), request.weightKg());
+        log.debug("Product creation prepared: tenantId={} productId={}", tenantId, product.getId());
+        return repository.save(product);
     }
 
     @Transactional(readOnly = true)

@@ -2,7 +2,7 @@
 
 A logistics platform being built step by step with Java 21 and Spring Boot.
 The current milestone includes PostgreSQL-backed warehouse, product catalog, and
-stock balance and movement APIs. Reservations, order fulfillment, React, Kafka,
+stock balance, movement, and reservation APIs. Order fulfillment, React, Kafka,
 Ollama, and Kubernetes are planned; they are not yet implemented.
 
 ## Run locally
@@ -173,6 +173,52 @@ enforces request uniqueness and valid movement arithmetic. Audit history has no
 update/delete API; database administrators can still modify it. Actor identity will
 be added with authentication. History is unpaginated for this local demo.
 
+## Reserve and release inventory
+
+A reservation holds units without changing physical stock. All items must have
+initialized stock in the same tenant-owned warehouse. A hold either succeeds for
+every line or changes nothing.
+
+```sh
+RESERVATION_REQUEST_ID=$(uuidgen)
+curl -i -X POST "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/reservations" \
+  -H 'Content-Type: application/json' \
+  -d "{\"requestId\":\"$RESERVATION_REQUEST_ID\",\"items\":[{\"productId\":\"$PRODUCT_ID\",\"quantity\":2}]}"
+```
+
+Copy the reservation ID from the response, then retrieve or release it:
+
+```sh
+RESERVATION_ID='<reservation UUID from the response>'
+curl -i "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/reservations/$RESERVATION_ID"
+curl -i -X POST "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/reservations/$RESERVATION_ID/release"
+```
+
+| Method | Endpoint | Behavior |
+| --- | --- | --- |
+| POST | `/api/v1/warehouses/{warehouseId}/reservations` | Hold all items; `201` with `Location`, or `200` for an identical retry |
+| GET | `/api/v1/warehouses/{warehouseId}/reservations/{reservationId}` | Read status, original items, and timestamps |
+| POST | `/api/v1/warehouses/{warehouseId}/reservations/{reservationId}/release` | Return all held units; `200`, including repeated release |
+
+`requestId` is a required UUID scoped to the tenant and warehouse. `items` must
+contain 1–50 distinct product UUIDs with positive integer quantities. Retrying the
+same ID and items (in any order) returns the current reservation without reserving
+again. Different items with the same ID return `409`. Replaying a released
+reservation returns `RELEASED` and does not reopen it.
+
+`onHand` stays unchanged; `reserved` increases on creation and decreases on release.
+Insufficient free units return `409`; invalid/duplicate items return `400`; missing
+or out-of-scope warehouses, stock, and reservation lookups return `404`. Every
+stock row is locked in consistent product-ID order. Different requests with the
+same retry key are also protected by a database unique constraint.
+
+Reservations do not expire automatically and are not yet linked to orders. They
+require explicit full release. Partial release, dispatch, and actor attribution
+will be separate milestones. Reservation creation/release emit operational logs
+after commit; DEBUG logging adds replay/lookup details. See the
+[development guide](docs/DEVELOPMENT_GUIDE.md) for a code walkthrough, comments,
+transaction handling, logging conventions, and how to enable DEBUG locally.
+
 ## Verify
 
 ```sh
@@ -192,10 +238,13 @@ submissions, tenant and warehouse isolation, invalid references, fractional and
 negative quantities, and database stock invariants. Movement tests verify audit
 history, replay behavior, rollback if audit insertion fails, reserved-stock and
 overflow protection, concurrent changes, tenant isolation, and upgrades from V4.
+Reservation tests cover multi-item rollback, competing holds, reordered retries,
+repeated/concurrent release, reserved-stock protection, scope validation, and
+success logging only after commit.
 
 ## Structure
 
-- `inventory`: stock balances, receipts, adjustments, audit history, and persistence
+- `inventory`: balances, movements, reservations, lifecycle handling, and commit-aware activity logging
 - `product`: product catalog controller, DTOs, service, entity, repository, and exceptions
 - `tenant`: shared server-side demo tenant until authentication is implemented
 - `warehouse/controller`: HTTP requests and responses
@@ -208,7 +257,7 @@ overflow protection, concurrent changes, tenant isolation, and upgrades from V4.
 
 ## Next milestones
 
-1. Add atomic inventory reservations with concurrency tests, release, and dispatch deductions.
+1. Add orders that use reservations, followed by dispatch deductions and reservation expiry.
 2. Add orders and shipments to complete one fulfillment workflow.
 3. Add OIDC authentication and authenticated tenant isolation.
 4. Build a React and TypeScript interface for that workflow.

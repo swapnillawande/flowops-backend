@@ -18,6 +18,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.UUID;
 
+/** Product HTTP boundary: validates input and maps entities to response records. */
 @RestController
 @RequestMapping("/api/v1/products")
 public class ProductController {

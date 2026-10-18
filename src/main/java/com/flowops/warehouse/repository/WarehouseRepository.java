@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+/** Tenant-scoped warehouse queries; use these lookups for business operations instead of findById. */
 public interface WarehouseRepository extends JpaRepository<Warehouse, UUID> {
 
     List<Warehouse> findByTenantId(UUID tenantId);

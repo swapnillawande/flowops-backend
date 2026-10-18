@@ -10,6 +10,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
+/** Tenant-owned catalog entry. SKU is unique within the tenant, not globally. */
 @Entity
 @Table(name = "products")
 public class Product {

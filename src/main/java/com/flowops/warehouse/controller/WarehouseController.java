@@ -16,6 +16,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.UUID;
 
+/** Warehouse HTTP boundary. The demo tenant comes from the server, never from request data. */
 @RestController
 @RequestMapping("/api/v1/warehouses")
 public class WarehouseController {

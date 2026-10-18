@@ -9,6 +9,7 @@ import jakarta.persistence.Table;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
+/** Tenant-owned warehouse location. Products and quantities are managed by separate modules. */
 @Entity
 @Table(name = "warehouses")
 public class Warehouse {
