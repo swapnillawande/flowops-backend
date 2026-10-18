@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 @Service
@@ -30,7 +31,7 @@ public class WarehouseService {
 
         String normalizedName = name.trim();
         String normalizedCity = city.trim();
-        String normalizedCountry = countryCode.trim().toUpperCase();
+        String normalizedCountry = countryCode.trim().toUpperCase(Locale.ROOT);
 
 
 		if (warehouseRepository.existsByTenantIdAndNameIgnoreCase(
