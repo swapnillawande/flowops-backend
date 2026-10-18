@@ -1,0 +1,61 @@
+package com.flowops.inventory.entity;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.Version;
+
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.UUID;
+
+@Entity
+@Table(name = "stock")
+public class Stock {
+    @Id
+    private UUID id;
+
+    @Column(name = "tenant_id", nullable = false)
+    private UUID tenantId;
+
+    @Column(name = "warehouse_id", nullable = false)
+    private UUID warehouseId;
+
+    @Column(name = "product_id", nullable = false)
+    private UUID productId;
+
+    @Column(name = "on_hand", nullable = false)
+    private int onHand;
+
+    @Column(nullable = false)
+    private int reserved;
+
+    @Version
+    private long version;
+
+    @Column(name = "created_at", nullable = false)
+    private OffsetDateTime createdAt;
+
+    protected Stock() {}
+
+    public Stock(UUID tenantId, UUID warehouseId, UUID productId, int onHand) {
+        this.id = UUID.randomUUID();
+        this.tenantId = tenantId;
+        this.warehouseId = warehouseId;
+        this.productId = productId;
+        this.onHand = onHand;
+        this.reserved = 0;
+        this.createdAt = OffsetDateTime.now(ZoneOffset.UTC);
+    }
+
+    public UUID getId() { return id; }
+    public UUID getTenantId() { return tenantId; }
+    public UUID getWarehouseId() { return warehouseId; }
+    public UUID getProductId() { return productId; }
+    public int getOnHand() { return onHand; }
+    public int getReserved() { return reserved; }
+    public int getAvailable() { return onHand - reserved; }
+    public long getVersion() { return version; }
+    public OffsetDateTime getCreatedAt() { return createdAt; }
+}
