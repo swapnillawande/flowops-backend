@@ -1,5 +1,6 @@
 package com.flowops.support;
 
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
@@ -8,6 +9,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /** A fresh PostgreSQL database; never connects to the developer's database. */
 @Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public abstract class PostgresIntegrationTest {
 
     @Container

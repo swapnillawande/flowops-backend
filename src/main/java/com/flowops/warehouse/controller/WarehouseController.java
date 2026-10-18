@@ -1,6 +1,7 @@
 
 package com.flowops.warehouse.controller;
 
+import com.flowops.tenant.DemoTenant;
 import com.flowops.warehouse.dto.CreateWarehouseRequest;
 import com.flowops.warehouse.dto.WarehouseResponse;
 import com.flowops.warehouse.entity.Warehouse;
@@ -19,11 +20,6 @@ import java.util.UUID;
 @RequestMapping("/api/v1/warehouses")
 public class WarehouseController {
 
-    private static final UUID DEMO_TENANT_ID =
-            UUID.fromString(
-                "11111111-1111-4111-8111-111111111111"
-            );
-
     private final WarehouseService warehouseService;
 
     public WarehouseController(WarehouseService warehouseService) {
@@ -34,7 +30,7 @@ public class WarehouseController {
     public ResponseEntity<WarehouseResponse> createWarehouse(@Valid @RequestBody CreateWarehouseRequest request) {
 
         Warehouse saved = warehouseService.createWarehouse(
-                DEMO_TENANT_ID,
+                DemoTenant.ID,
                 request.name(),
                 request.city(),
                 request.countryCode()
@@ -52,7 +48,7 @@ public class WarehouseController {
     @GetMapping
     public List<WarehouseResponse> getWarehouses() {
 
-        return warehouseService.getWarehouses(DEMO_TENANT_ID)
+        return warehouseService.getWarehouses(DemoTenant.ID)
                 .stream()
                 .map(WarehouseResponse::from)
                 .toList();
@@ -63,7 +59,7 @@ public class WarehouseController {
             @PathVariable UUID id) {
 
         Warehouse warehouse = warehouseService
-                .getWarehouseById(DEMO_TENANT_ID, id);
+                .getWarehouseById(DemoTenant.ID, id);
 
         return WarehouseResponse.from(warehouse);
     }

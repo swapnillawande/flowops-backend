@@ -1,6 +1,8 @@
 
 package com.flowops.exception;
 
+import com.flowops.product.exception.DuplicateProductException;
+import com.flowops.product.exception.ProductNotFoundException;
 import com.flowops.warehouse.exception.DuplicateWarehouseException;
 import com.flowops.warehouse.exception.WarehouseNotFoundException;
 
@@ -18,9 +20,9 @@ import java.util.Map;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(WarehouseNotFoundException.class)
+    @ExceptionHandler({WarehouseNotFoundException.class, ProductNotFoundException.class})
     public ResponseEntity<Map<String, String>> handleNotFound(
-            WarehouseNotFoundException ex) {
+            RuntimeException ex) {
 
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(Map.of("error", ex.getMessage()));
@@ -56,8 +58,8 @@ public class GlobalExceptionHandler {
     }
     
     
-	@ExceptionHandler(DuplicateWarehouseException.class)
-	public ResponseEntity<Map<String, String>> handleDuplicate(DuplicateWarehouseException ex) {
+	@ExceptionHandler({DuplicateWarehouseException.class, DuplicateProductException.class})
+	public ResponseEntity<Map<String, String>> handleDuplicate(RuntimeException ex) {
 
 		return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", ex.getMessage()));
 	}

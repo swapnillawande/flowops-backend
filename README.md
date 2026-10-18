@@ -1,8 +1,9 @@
 # FlowOps AI
 
 A logistics platform being built step by step with Java 21 and Spring Boot.
-The current milestone is a PostgreSQL-backed warehouse API. Inventory, order
-fulfillment, React, Kafka, Ollama, and Kubernetes are planned; they are not yet implemented.
+The current milestone includes PostgreSQL-backed warehouse and product catalog APIs.
+Stock management, order fulfillment, React, Kafka, Ollama, and Kubernetes are
+planned; they are not yet implemented.
 
 ## Run locally
 
@@ -56,6 +57,36 @@ cannot choose the tenant. Tenant-scoped queries are tested, but this is not an
 authenticated multi-tenant deployment. Add OIDC and derive the tenant from verified
 identity claims before exposing business APIs publicly.
 
+## Try the product catalog
+
+A product identifies what can be stored or shipped. Its SKU is unique within a
+tenant and normalized to uppercase. Stock quantities belong to the next milestone.
+
+```sh
+curl -i -X POST http://localhost:8080/api/v1/products \
+  -H 'Content-Type: application/json' \
+  -d '{"sku":"laptop-001","name":"Business laptop","weightKg":1.250}'
+curl -i http://localhost:8080/api/v1/products
+```
+
+| Method | Endpoint | Behavior |
+| --- | --- | --- |
+| POST | `/api/v1/products` | Create a product; returns `201` and its `Location` |
+| GET | `/api/v1/products` | List demo tenant products ordered by SKU |
+| GET | `/api/v1/products/{id}` | Retrieve a demo tenant product |
+
+Follow the creation response's `Location` to retrieve the product. SKU supports
+1–64 ASCII letters, digits, dots, underscores, or hyphens, starting with a letter
+or digit. Leading and trailing spaces are trimmed from SKU and name. Name is
+required and limited to 150 characters after trimming. `weightKg` is required,
+positive, and supports at most six integer and three decimal digits (0.001 to
+999999.999). Decimal storage avoids binary floating point rounding in weights.
+
+Duplicate SKU returns `409`, invalid input `400`, and unknown or another tenant's
+product `404`. Products share the warehouse API's fixed demo tenant and currently
+have no authentication. The list is unpaginated for this initial demo; pagination
+is needed before supporting large catalogs.
+
 ## Verify
 
 ```sh
@@ -68,10 +99,13 @@ may download the database image and Maven dependencies.
 
 Tests cover the application context, warehouse service, HTTP creation/retrieval,
 normalization, validation, malformed requests, duplicate names, the database
-uniqueness constraint, and isolation of another tenant's records.
+uniqueness constraint, and isolation of another tenant's records. Product tests also
+cover SKU normalization, sorted listing, weight limits, and database constraints.
 
 ## Structure
 
+- `product`: product catalog controller, DTOs, service, entity, repository, and exceptions
+- `tenant`: shared server-side demo tenant until authentication is implemented
 - `warehouse/controller`: HTTP requests and responses
 - `warehouse/dto`: validated input and public response fields
 - `warehouse/service`: business operations and transaction boundaries
@@ -82,7 +116,7 @@ uniqueness constraint, and isolation of another tenant's records.
 
 ## Next milestones
 
-1. Add products, warehouse stock, and atomic inventory reservations with concurrency tests.
+1. Add warehouse stock for existing products, then atomic inventory reservations with concurrency tests.
 2. Add orders and shipments to complete one fulfillment workflow.
 3. Add OIDC authentication and authenticated tenant isolation.
 4. Build a React and TypeScript interface for that workflow.
