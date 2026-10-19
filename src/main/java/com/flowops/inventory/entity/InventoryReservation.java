@@ -1,5 +1,7 @@
 package com.flowops.inventory.entity;
 
+import com.flowops.inventory.exception.ReservationConflictException;
+import java.util.Objects;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -9,7 +11,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
-/** Durable lifecycle of a warehouse hold; release is a terminal, retry-safe transition. */
+/** Durable warehouse hold: release returns held units, while consumption removes the physical units. */
 @Entity
 @Table(name = "inventory_reservations")
 public class InventoryReservation {
@@ -27,6 +29,10 @@ public class InventoryReservation {
     private String status;
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
+    @Column(name = "consumed_at")
+    private OffsetDateTime consumedAt;
+    @Column(name = "consumed_shipment_id")
+    private UUID consumedShipmentId;
     @Column(name = "released_at")
     private OffsetDateTime releasedAt;
 
@@ -55,6 +61,16 @@ public class InventoryReservation {
         }
     }
 
+    /** Consumed holds cannot later be released; physical units have already left the warehouse. */
+    public void consume(UUID shipmentId) {
+        if (!isActive()) throw new ReservationConflictException("Only active holds can be consumed");
+        Objects.requireNonNull(shipmentId, "Shipment ID is required");
+        status = "CONSUMED";
+        consumedAt = OffsetDateTime.now(ZoneOffset.UTC);
+        consumedShipmentId = shipmentId;
+    }
+    public OffsetDateTime getConsumedAt() { return consumedAt; }
+    public UUID getConsumedShipmentId() { return consumedShipmentId; }
     public boolean isActive() { return "ACTIVE".equals(status); }
     public UUID getOwnerOrderId() { return ownerOrderId; }
     public UUID getId() { return id; }

@@ -1,6 +1,8 @@
 
 package com.flowops.exception;
 
+import com.flowops.shipment.exception.ShipmentNotFoundException;
+import com.flowops.shipment.exception.ShipmentConflictException;
 import com.flowops.order.exception.OrderNotFoundException;
 import com.flowops.order.exception.OrderConflictException;
 import com.flowops.inventory.exception.ReservationNotFoundException;
@@ -31,7 +33,7 @@ import java.util.Map;
 public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-    @ExceptionHandler({WarehouseNotFoundException.class, ProductNotFoundException.class, StockNotFoundException.class, ReservationNotFoundException.class, OrderNotFoundException.class})
+    @ExceptionHandler({WarehouseNotFoundException.class, ProductNotFoundException.class, StockNotFoundException.class, ReservationNotFoundException.class, OrderNotFoundException.class, ShipmentNotFoundException.class})
     public ResponseEntity<Map<String, String>> handleNotFound(
             RuntimeException ex) {
         log.debug("Request rejected: exceptionType={}", ex.getClass().getSimpleName());
@@ -70,7 +72,7 @@ public class GlobalExceptionHandler {
     }
     
     
-	@ExceptionHandler({DuplicateWarehouseException.class, DuplicateProductException.class, DuplicateStockException.class, StockMovementConflictException.class, ReservationConflictException.class, OrderConflictException.class})
+	@ExceptionHandler({DuplicateWarehouseException.class, DuplicateProductException.class, DuplicateStockException.class, StockMovementConflictException.class, ReservationConflictException.class, OrderConflictException.class, ShipmentConflictException.class})
 	public ResponseEntity<Map<String, String>> handleDuplicate(RuntimeException ex) {
         log.debug("Request rejected: exceptionType={}", ex.getClass().getSimpleName());
 

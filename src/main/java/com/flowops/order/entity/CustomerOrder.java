@@ -17,6 +17,7 @@ public class CustomerOrder {
     @Column(nullable = false, length = 20) private String status;
     @Column(name = "reservation_id") private UUID reservationId;
     @Column(name = "created_at", nullable = false) private OffsetDateTime createdAt;
+    @Column(name = "dispatched_at") private OffsetDateTime dispatchedAt;
     @Column(name = "cancelled_at") private OffsetDateTime cancelledAt;
 
     protected CustomerOrder() {} // Creation uses the repository's atomic request-key claim.
@@ -35,6 +36,14 @@ public class CustomerOrder {
         cancelledAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 
+    /** Called after inventory consumes the hold, within the same shipment transaction. */
+    public void dispatch() {
+        if (!"CONFIRMED".equals(status)) throw new IllegalStateException("Only confirmed orders can be dispatched");
+        status = "DISPATCHED";
+        dispatchedAt = OffsetDateTime.now(ZoneOffset.UTC);
+    }
+
+    public OffsetDateTime getDispatchedAt() { return dispatchedAt; }
     public UUID getId() { return id; }
     public UUID getRequestId() { return requestId; }
     public UUID getWarehouseId() { return warehouseId; }

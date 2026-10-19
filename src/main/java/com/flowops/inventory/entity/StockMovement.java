@@ -19,6 +19,8 @@ public class StockMovement {
     private UUID tenantId;
     @Column(name = "stock_id", nullable = false)
     private UUID stockId;
+    @Column(name = "shipment_id")
+    private UUID shipmentId;
     @Column(name = "request_id")
     private UUID requestId;
     @Column(nullable = false, length = 20)
@@ -50,6 +52,14 @@ public class StockMovement {
         this.createdAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 
+    /** Internal dispatch audit has its own idempotency key, separate from public receipt request IDs. */
+    public static StockMovement dispatch(Stock stock, UUID shipmentId, int quantity, int before) {
+        StockMovement movement = new StockMovement(stock, null, "DISPATCH", -quantity, before, "Shipment dispatched");
+        movement.shipmentId = shipmentId;
+        return movement;
+    }
+
+    public UUID getShipmentId() { return shipmentId; }
     public UUID getId() { return id; }
     public UUID getStockId() { return stockId; }
     public UUID getRequestId() { return requestId; }

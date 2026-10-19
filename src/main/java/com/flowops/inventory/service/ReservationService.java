@@ -5,6 +5,8 @@ import com.flowops.inventory.dto.ReservationResponse;
 import com.flowops.inventory.entity.InventoryReservation;
 import com.flowops.inventory.entity.ReservationItem;
 import com.flowops.inventory.entity.Stock;
+import com.flowops.inventory.entity.StockMovement;
+import com.flowops.inventory.repository.StockMovementRepository;
 import com.flowops.inventory.event.InventoryActivity;
 import com.flowops.inventory.exception.ReservationConflictException;
 import com.flowops.inventory.exception.ReservationNotFoundException;
@@ -31,14 +33,17 @@ public class ReservationService {
     private final ReservationRepository reservations;
     private final ReservationItemRepository items;
     private final StockRepository stocks;
+    private final StockMovementRepository movements;
     private final WarehouseService warehouses;
     private final ApplicationEventPublisher events;
 
     public ReservationService(ReservationRepository reservations, ReservationItemRepository items,
-                              StockRepository stocks, WarehouseService warehouses, ApplicationEventPublisher events) {
+                              StockRepository stocks, WarehouseService warehouses, ApplicationEventPublisher events,
+                              StockMovementRepository movements) {
         this.reservations = reservations;
         this.items = items;
         this.stocks = stocks;
+        this.movements = movements;
         this.warehouses = warehouses;
         this.events = events;
     }
@@ -109,6 +114,9 @@ public class ReservationService {
                 .orElseThrow(ReservationNotFoundException::new);
         requireOwner(reservation, orderId);
         var originalItems = items.findByTenantIdAndReservationIdOrderByProductIdAsc(tenantId, reservationId);
+        if ("CONSUMED".equals(reservation.getStatus())) {
+            throw new ReservationConflictException("Consumed reservations cannot be released");
+        }
         if (!reservation.isActive()) {
             log.debug("Reservation release replay: tenantId={} reservationId={}", tenantId, reservationId);
             return ReservationResponse.from(reservation, originalItems);
@@ -131,6 +139,31 @@ public class ReservationService {
         log.debug("Reservation lookup: tenantId={} reservationId={}", tenantId, reservationId);
         return ReservationResponse.from(reservation,
                 items.findByTenantIdAndReservationIdOrderByProductIdAsc(tenantId, reservationId));
+    }
+
+    /** Deduct all physical units and append their audit entries in the enclosing order/shipment transaction. */
+    @Transactional
+    public void consumeForOrder(UUID tenantId, UUID warehouseId, UUID reservationId, UUID orderId, UUID shipmentId) {
+        var reservation = reservations.findForUpdate(reservationId, tenantId, warehouseId)
+                .orElseThrow(ReservationNotFoundException::new);
+        requireOwner(reservation, Objects.requireNonNull(orderId));
+        if ("CONSUMED".equals(reservation.getStatus()) && shipmentId.equals(reservation.getConsumedShipmentId())) {
+            log.debug("Reservation consumption replay: tenantId={} reservationId={}", tenantId, reservationId);
+            return;
+        }
+        if (!reservation.isActive()) throw new ReservationConflictException("Only active holds can be dispatched");
+        var heldItems = items.findByTenantIdAndReservationIdOrderByProductIdAsc(tenantId, reservationId);
+        Map<UUID, Integer> quantities = new TreeMap<>();
+        heldItems.forEach(item -> quantities.put(item.getProductId(), item.getQuantity()));
+        var locked = lockStocks(tenantId, warehouseId, quantities);
+        quantities.forEach((productId, quantity) -> {
+            Stock stock = locked.get(productId);
+            int before = stock.getOnHand();
+            stock.dispatchReserved(quantity);
+            movements.save(StockMovement.dispatch(stock, shipmentId, quantity, before));
+        });
+        reservation.consume(shipmentId);
+        events.publishEvent(new InventoryActivity("RESERVATION_CONSUMED", tenantId, warehouseId, reservationId));
     }
 
     private void requireOwner(InventoryReservation reservation, UUID orderId) {

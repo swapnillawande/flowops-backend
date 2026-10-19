@@ -37,7 +37,8 @@ be held, the whole transaction rolls back, including earlier item changes.
 For standalone reservations, the client reuses a request ID for retries. An identical retry returns the existing
 reservation. Changing the items with that ID returns a conflict. Release locks the
 reservation before returning its units, so two release requests cannot return the
-same hold twice. The lifecycle is `ACTIVE -> RELEASED`; there is no delete API.
+same hold twice. Standalone holds follow `ACTIVE -> RELEASED`; order-owned holds may instead become
+`CONSUMED` during dispatch. Neither terminal state can be reopened; there is no delete API.
 
 ## Order and inventory integration
 
@@ -65,6 +66,39 @@ keys, so future service extraction remains possible.
 Customer references and product names are not included in application log messages.
 These synchronous module calls are not a distributed saga. Extracting services
 will require durable commands/events and compensation for failure handling.
+
+## Shipment preparation and dispatch
+
+Follow `ShipmentController -> ShipmentService -> OrderService -> ReservationService`.
+ShipmentService never queries order or inventory tables. Preparation locks the
+order and creates one shipment, leaving the stock hold unchanged. The order ID
+acts as the shipment creation retry key, and a repeated carrier label replays the
+existing shipment.
+
+Dispatch obtains locks in the order: order, shipment, reservation, then stock rows
+in consistent product order. Inventory removes each held quantity from both
+`onHand` and `reserved`, writes `DISPATCH` audit entries, and marks the reservation
+`CONSUMED`. OrderService marks the order `DISPATCHED`; ShipmentService marks its
+shipment `DISPATCHED`. All modules share one transaction, so a failure at any step
+rolls back every state and quantity change.
+
+The scalar shipment-to-order lookup before locking avoids loading an entity that
+could become stale while waiting for the order lock. Repeated dispatch reads the
+already-dispatched shipment and does not consume again. Dispatch audit keys are
+separate from client-supplied movement request IDs to avoid namespace collisions.
+
+Cancellation has a different event contract from logging. OrderService publishes
+`OrderCancellation` synchronously inside the transaction. ShipmentService's
+`@EventListener` cancels a prepared shipment, and `MANDATORY` propagation requires
+an existing transaction. Listener errors roll back order cancellation and stock
+release. By contrast, `@TransactionalEventListener` activity loggers run only after
+commit. Do not make the cancellation listener asynchronous without replacing this
+consistency model with a durable workflow.
+
+Both cancellation and dispatch lock the same order first. Whichever commits first
+makes the other command invalid; a dispatched order needs a future returns flow,
+not cancellation. Internal tracking numbers and carrier labels do not represent
+real carrier bookings. Delivery events and partial shipping are not implemented.
 
 ## Comments and readability
 
@@ -114,5 +148,7 @@ messages, a Kafka outbox, or delivery guarantees to another service.
 
 Authentication and actor attribution are not implemented yet. Standalone reservations
 require explicit release; order-owned holds must be released through order cancellation.
-Expiration, partial release, shipments, and dispatch remain future work. Keep this application local until authenticated tenant isolation is
+Expiration, partial release, delivery tracking, and returns remain future work.
+Full-order shipments and dispatch are implemented; cancelling prepared shipments
+is coordinated through order cancellation. Keep this application local until authenticated tenant isolation is
 implemented. See the README for runnable API examples and the next milestones.

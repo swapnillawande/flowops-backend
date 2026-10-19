@@ -7,6 +7,7 @@ import com.flowops.order.dto.OrderResponse;
 import com.flowops.order.entity.CustomerOrder;
 import com.flowops.order.entity.OrderItem;
 import com.flowops.order.event.OrderActivity;
+import com.flowops.order.event.OrderCancellation;
 import com.flowops.order.exception.OrderConflictException;
 import com.flowops.order.exception.OrderNotFoundException;
 import com.flowops.order.repository.OrderItemRepository;
@@ -94,10 +95,33 @@ public class OrderService {
             log.debug("Order cancellation replay: tenantId={} orderId={}", tenantId, orderId);
             return response(tenantId, order);
         }
+        if (!"CONFIRMED".equals(order.getStatus())) {
+            throw new OrderConflictException("Only confirmed orders can be cancelled; dispatched orders require a return workflow");
+        }
         inventory.releaseForOrder(tenantId, order.getWarehouseId(), order.getReservationId(), orderId);
         order.cancel();
+        // Synchronous listeners join this transaction; shipment failure rolls cancellation back too.
+        events.publishEvent(new OrderCancellation(tenantId, orderId));
         events.publishEvent(new OrderActivity("ORDER_CANCELLED", tenantId, orderId));
         return response(tenantId, order);
+    }
+
+    /** Shipment mutations acquire this lock before touching their own rows or inventory. */
+    @Transactional
+    public OrderResponse lockForFulfillment(UUID tenantId, UUID orderId) {
+        return response(tenantId, orders.findForUpdate(orderId, tenantId).orElseThrow(OrderNotFoundException::new));
+    }
+
+    /** No public order-dispatch HTTP command: shipment dispatch owns this orchestration. */
+    @Transactional
+    public void dispatchForShipment(UUID tenantId, UUID orderId, UUID shipmentId) {
+        var order = orders.findForUpdate(orderId, tenantId).orElseThrow(OrderNotFoundException::new);
+        if (!"CONFIRMED".equals(order.getStatus())) {
+            throw new OrderConflictException("Only confirmed orders can be dispatched");
+        }
+        inventory.consumeForOrder(tenantId, order.getWarehouseId(), order.getReservationId(), orderId, shipmentId);
+        order.dispatch();
+        events.publishEvent(new OrderActivity("ORDER_DISPATCHED", tenantId, orderId));
     }
 
     @Transactional(readOnly = true)

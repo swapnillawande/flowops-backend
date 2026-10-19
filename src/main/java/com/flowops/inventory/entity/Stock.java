@@ -77,6 +77,15 @@ public class Stock {
         reserved -= quantity;
     }
 
+    /** Dispatch removes both the physical units and their hold, preserving other orders' reservations. */
+    public void dispatchReserved(int quantity) {
+        if (quantity <= 0 || quantity > reserved || quantity > onHand) {
+            throw new ReservationConflictException("Dispatch exceeds currently held stock");
+        }
+        reserved -= quantity;
+        onHand -= quantity;
+    }
+
     public UUID getId() { return id; }
     public UUID getTenantId() { return tenantId; }
     public UUID getWarehouseId() { return warehouseId; }

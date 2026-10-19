@@ -11,11 +11,11 @@ import java.util.UUID;
 /** API snapshot of the hold and its original items, including the release timestamp when terminal. */
 public record ReservationResponse(UUID id, UUID warehouseId, UUID requestId, UUID ownerOrderId, String status,
                                   List<CreateReservationRequest.Item> items,
-                                  OffsetDateTime createdAt, OffsetDateTime releasedAt) {
+                                  OffsetDateTime createdAt, OffsetDateTime releasedAt, OffsetDateTime consumedAt, UUID consumedShipmentId) {
     public static ReservationResponse from(InventoryReservation reservation, List<ReservationItem> items) {
         return new ReservationResponse(reservation.getId(), reservation.getWarehouseId(), reservation.getRequestId(),
                 reservation.getOwnerOrderId(), reservation.getStatus(), items.stream().sorted(Comparator.comparing(ReservationItem::getProductId))
                 .map(item -> new CreateReservationRequest.Item(item.getProductId(), item.getQuantity())).toList(),
-                reservation.getCreatedAt(), reservation.getReleasedAt());
+                reservation.getCreatedAt(), reservation.getReleasedAt(), reservation.getConsumedAt(), reservation.getConsumedShipmentId());
     }
 }

@@ -2,8 +2,8 @@
 
 A logistics platform being built step by step with Java 21 and Spring Boot.
 The current milestone includes PostgreSQL-backed warehouse, product catalog, and
-stock balances, movements, reservations, and orders with stock holds and cancellation.
-Shipments, dispatch, React, Kafka, Ollama, and Kubernetes are planned; they are not yet implemented.
+stock balances, movements, reservations, orders, shipment preparation, and dispatch.
+Delivery tracking, React, Kafka, Ollama, and Kubernetes are planned; they are not yet implemented.
 
 ## Run locally
 
@@ -215,7 +215,8 @@ same retry key are also protected by a database unique constraint.
 Standalone reservations require explicit full release and do not expire automatically.
 Order-created reservations expose an `ownerOrderId`; release these through order
 cancellation. Direct release or standalone retry of an order-owned reservation
-returns `409`. Partial release, dispatch, and actor attribution remain future work. Reservation creation/release emit operational logs
+returns `409`. Partial release and actor attribution remain future work. Dispatch consumes an
+order-owned hold; consumed units cannot be released. Reservation creation/release emit operational logs
 after commit; DEBUG logging adds replay/lookup details. See the
 [development guide](docs/DEVELOPMENT_GUIDE.md) for a code walkthrough, comments,
 transaction handling, logging conventions, and how to enable DEBUG locally.
@@ -224,8 +225,7 @@ transaction handling, logging conventions, and how to enable DEBUG locally.
 
 Orders use the existing catalog and warehouse stock. Order creation and its owned
 reservation commit together: insufficient stock or any write failure leaves no
-order, reservation, or partial hold. This milestone manages fulfillment quantities,
-not pricing, tax, payments, or delivery addresses.
+order, reservation, or partial hold. Orders manage fulfillment quantities, not pricing, tax, payments, or delivery addresses.
 
 ```sh
 ORDER_REQUEST_ID=$(uuidgen)
@@ -258,7 +258,8 @@ cannot reserve more than the available units.
 
 New orders return `CONFIRMED`, with physical stock unchanged and reserved units
 increased. Cancellation returns `CANCELLED` plus a timestamp, releasing only that
-order's units. Product SKUs and names are snapshotted so later catalog edits do not
+order's units and cancelling any prepared shipment in the same transaction.
+Once dispatched, cancellation returns `409`; a returns workflow is future work. Product SKUs and names are snapshotted so later catalog edits do not
 rewrite order history. Unknown or other-tenant order IDs return `404`; malformed
 input returns `400`; insufficient stock or conflicting retry details return `409`.
 
@@ -272,6 +273,67 @@ Orders never directly access inventory tables. A temporary `PENDING` order row
 claims the retry key, becomes confirmed after reservation, and rolls back on
 failure. If modules become separate services, this transaction must be replaced
 with an explicit saga/outbox design. No distributed consistency is claimed yet.
+
+## Prepare and dispatch shipments
+
+Use a confirmed order from the previous step. If you already cancelled that order,
+create a fresh order with a new request ID first. This milestone ships every item
+in the order together; partial/split shipments are not supported.
+
+```sh
+curl -i -X POST http://localhost:8080/api/v1/shipments \
+  -H 'Content-Type: application/json' \
+  -d "{\"orderId\":\"$ORDER_ID\",\"carrier\":\"Demo carrier\"}"
+SHIPMENT_ID='<shipment UUID from the response>'
+curl -i "http://localhost:8080/api/v1/shipments/$SHIPMENT_ID"
+curl -i 'http://localhost:8080/api/v1/shipments?page=0&size=20'
+curl -i -X POST "http://localhost:8080/api/v1/shipments/$SHIPMENT_ID/dispatch"
+```
+
+| Method | Endpoint | Behavior |
+| --- | --- | --- |
+| POST | `/api/v1/shipments` | Prepare a full-order shipment; `201` plus `Location`, or `200` on replay |
+| GET | `/api/v1/shipments/{shipmentId}` | Read shipment details and internal tracking number |
+| GET | `/api/v1/shipments?page=0&size=20` | Tenant-scoped pages with the same bounds as orders |
+| POST | `/api/v1/shipments/{shipmentId}/dispatch` | Dispatch once; retries return the current dispatched result with `200` |
+
+`orderId` is required. `carrier` is a required, trimmed, case-sensitive label of
+1–80 characters. Each tenant/order has at most one shipment. Repeating the same
+order and carrier returns its current shipment, including after dispatch or
+cancellation. Changing the carrier returns `409`; carrier editing is not exposed.
+An order cancelled before shipment creation cannot receive a new shipment.
+
+Preparation creates a `PREPARED` shipment with a unique internal `FLO-...` tracking
+number. It leaves the order `CONFIRMED` and all quantities unchanged. The carrier
+label and tracking number are demo data, not an external carrier booking or live
+tracking integration.
+
+Dispatch commits these changes together:
+
+- Shipment becomes `DISPATCHED` with a timestamp.
+- Order becomes `DISPATCHED` with a timestamp.
+- Owned reservation becomes `CONSUMED`, recording the shipment ID and timestamp.
+- Each item's quantity is subtracted from both physical and reserved stock.
+- A negative `DISPATCH` stock movement records the shipment ID and before/after balance.
+
+For example, `onHand=10`, `reserved=3`, `available=7` becomes `onHand=7`,
+`reserved=0`, `available=7` when those three held units leave. Other orders' holds
+remain untouched. Dispatch audit entries use a separate shipment key so public
+receipt request IDs cannot collide with them. Clients cannot submit `DISPATCH`
+through the generic stock movement API.
+
+Cancelling a confirmed order also cancels its prepared shipment and releases its
+hold. Cancellation and dispatch lock the order first, so only one can succeed when
+they race. A cancelled shipment cannot dispatch; a dispatched order cannot cancel.
+Stock is not restored by retrying a release after consumption. Missing/out-of-tenant
+IDs return `404`; invalid input returns `400`; lifecycle conflicts return `409`.
+
+Stock deductions, audit entries, reservation consumption, order status, and shipment
+status use one local database transaction. Any write failure rolls the entire
+operation back. Synchronous order-cancellation listeners participate in that same
+transaction; commit-aware activity listeners log only successful changes. These
+are in-process events, not durable Kafka messages. Delivery updates, shipment event
+history, carrier APIs, returns, and partial fulfillment remain future work.
 
 ## Verify
 
@@ -297,10 +359,13 @@ repeated/concurrent release, reserved-stock protection, scope validation, and
 success logging only after commit. Order tests cover atomic creation/cancellation,
 concurrent retry and overselling protection, rollback across module boundaries,
 tenant-scoped pagination, catalog snapshots, and preventing direct release of
-order-owned reservations.
+order-owned reservations. Shipment tests cover dispatch accounting, audit and
+state rollback, retry-key isolation, cancellation/dispatch races, concurrent
+dispatch, tenant scope, and upgrading confirmed orders with active holds from V7.
 
 ## Structure
 
+- `shipment`: preparation, tracking identifiers, full-order dispatch, cancellation coordination, and logs
 - `order`: order lifecycle, product snapshots, pagination, inventory integration, and commit-aware logs
 - `inventory`: balances, movements, reservations, lifecycle handling, and commit-aware activity logging
 - `product`: product catalog controller, DTOs, service, entity, repository, and exceptions
@@ -315,7 +380,7 @@ order-owned reservations.
 
 ## Next milestones
 
-1. Add shipment creation and dispatch deductions, followed by reservation expiry with order coordination.
+1. Add shipment status history and delivery updates, followed by reservation expiry with order coordination.
 2. Add orders and shipments to complete one fulfillment workflow.
 3. Add OIDC authentication and authenticated tenant isolation.
 4. Build a React and TypeScript interface for that workflow.
