@@ -19,6 +19,8 @@ public class InventoryReservation {
     private UUID tenantId;
     @Column(name = "warehouse_id", nullable = false)
     private UUID warehouseId;
+    @Column(name = "owner_order_id")
+    private UUID ownerOrderId;
     @Column(name = "request_id", nullable = false)
     private UUID requestId;
     @Column(nullable = false, length = 20)
@@ -31,6 +33,12 @@ public class InventoryReservation {
     protected InventoryReservation() {} // JPA constructs entities when loading database rows.
 
     public InventoryReservation(UUID tenantId, UUID warehouseId, UUID requestId) {
+        this(tenantId, warehouseId, requestId, null);
+    }
+
+    /** An order-owned hold can be released only through the order workflow. */
+    public InventoryReservation(UUID tenantId, UUID warehouseId, UUID requestId, UUID ownerOrderId) {
+        this.ownerOrderId = ownerOrderId;
         this.id = UUID.randomUUID();
         this.tenantId = tenantId;
         this.warehouseId = warehouseId;
@@ -48,6 +56,7 @@ public class InventoryReservation {
     }
 
     public boolean isActive() { return "ACTIVE".equals(status); }
+    public UUID getOwnerOrderId() { return ownerOrderId; }
     public UUID getId() { return id; }
     public UUID getWarehouseId() { return warehouseId; }
     public UUID getRequestId() { return requestId; }

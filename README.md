@@ -2,8 +2,8 @@
 
 A logistics platform being built step by step with Java 21 and Spring Boot.
 The current milestone includes PostgreSQL-backed warehouse, product catalog, and
-stock balance, movement, and reservation APIs. Order fulfillment, React, Kafka,
-Ollama, and Kubernetes are planned; they are not yet implemented.
+stock balances, movements, reservations, and orders with stock holds and cancellation.
+Shipments, dispatch, React, Kafka, Ollama, and Kubernetes are planned; they are not yet implemented.
 
 ## Run locally
 
@@ -212,12 +212,66 @@ or out-of-scope warehouses, stock, and reservation lookups return `404`. Every
 stock row is locked in consistent product-ID order. Different requests with the
 same retry key are also protected by a database unique constraint.
 
-Reservations do not expire automatically and are not yet linked to orders. They
-require explicit full release. Partial release, dispatch, and actor attribution
-will be separate milestones. Reservation creation/release emit operational logs
+Standalone reservations require explicit full release and do not expire automatically.
+Order-created reservations expose an `ownerOrderId`; release these through order
+cancellation. Direct release or standalone retry of an order-owned reservation
+returns `409`. Partial release, dispatch, and actor attribution remain future work. Reservation creation/release emit operational logs
 after commit; DEBUG logging adds replay/lookup details. See the
 [development guide](docs/DEVELOPMENT_GUIDE.md) for a code walkthrough, comments,
 transaction handling, logging conventions, and how to enable DEBUG locally.
+
+## Create and cancel orders
+
+Orders use the existing catalog and warehouse stock. Order creation and its owned
+reservation commit together: insufficient stock or any write failure leaves no
+order, reservation, or partial hold. This milestone manages fulfillment quantities,
+not pricing, tax, payments, or delivery addresses.
+
+```sh
+ORDER_REQUEST_ID=$(uuidgen)
+curl -i -X POST http://localhost:8080/api/v1/orders \
+  -H 'Content-Type: application/json' \
+  -d "{\"requestId\":\"$ORDER_REQUEST_ID\",\"warehouseId\":\"$WAREHOUSE_ID\",\"customerReference\":\"DEMO-CUSTOMER-42\",\"items\":[{\"productId\":\"$PRODUCT_ID\",\"quantity\":2}]}"
+ORDER_ID='<order UUID from the response>'
+curl -i "http://localhost:8080/api/v1/orders/$ORDER_ID"
+curl -i 'http://localhost:8080/api/v1/orders?page=0&size=20'
+curl -i -X POST "http://localhost:8080/api/v1/orders/$ORDER_ID/cancel"
+```
+
+| Method | Endpoint | Behavior |
+| --- | --- | --- |
+| POST | `/api/v1/orders` | Create order plus hold; `201` with `Location`, or `200` on identical replay |
+| GET | `/api/v1/orders/{orderId}` | Read order, original product snapshots, and reservation ID |
+| GET | `/api/v1/orders?page=0&size=20` | List tenant orders with pagination metadata |
+| POST | `/api/v1/orders/{orderId}/cancel` | Cancel and release the hold together; repeated cancellation returns `200` |
+
+Input requires a request UUID, warehouse UUID, trimmed customer reference of 1–100
+characters, and 1–50 distinct product UUIDs with positive integer quantities.
+The warehouse, products, and stock must be accessible within the fixed demo tenant.
+A customer reference is a correlation label, not a verified customer identity.
+
+The request ID is unique per tenant. An identical retry (including reordered items)
+returns the current order; changed warehouse, reference, or quantities return `409`.
+A cancelled order stays cancelled on replay. Use a new request ID for a new order.
+Concurrent identical requests produce one order and one hold. Competing orders
+cannot reserve more than the available units.
+
+New orders return `CONFIRMED`, with physical stock unchanged and reserved units
+increased. Cancellation returns `CANCELLED` plus a timestamp, releasing only that
+order's units. Product SKUs and names are snapshotted so later catalog edits do not
+rewrite order history. Unknown or other-tenant order IDs return `404`; malformed
+input returns `400`; insufficient stock or conflicting retry details return `409`.
+
+Pages use a zero-based nonnegative page number and a size from 1 to 100 (default
+20), ordered by newest creation time then ID. The response includes `content`,
+`page`, `size`, `totalElements`, and `totalPages`. Item snapshots are currently
+loaded per order within a bounded page; batch fetching is a later optimization.
+
+This modular monolith uses one local database transaction across module services.
+Orders never directly access inventory tables. A temporary `PENDING` order row
+claims the retry key, becomes confirmed after reservation, and rolls back on
+failure. If modules become separate services, this transaction must be replaced
+with an explicit saga/outbox design. No distributed consistency is claimed yet.
 
 ## Verify
 
@@ -240,10 +294,14 @@ history, replay behavior, rollback if audit insertion fails, reserved-stock and
 overflow protection, concurrent changes, tenant isolation, and upgrades from V4.
 Reservation tests cover multi-item rollback, competing holds, reordered retries,
 repeated/concurrent release, reserved-stock protection, scope validation, and
-success logging only after commit.
+success logging only after commit. Order tests cover atomic creation/cancellation,
+concurrent retry and overselling protection, rollback across module boundaries,
+tenant-scoped pagination, catalog snapshots, and preventing direct release of
+order-owned reservations.
 
 ## Structure
 
+- `order`: order lifecycle, product snapshots, pagination, inventory integration, and commit-aware logs
 - `inventory`: balances, movements, reservations, lifecycle handling, and commit-aware activity logging
 - `product`: product catalog controller, DTOs, service, entity, repository, and exceptions
 - `tenant`: shared server-side demo tenant until authentication is implemented
@@ -257,7 +315,7 @@ success logging only after commit.
 
 ## Next milestones
 
-1. Add orders that use reservations, followed by dispatch deductions and reservation expiry.
+1. Add shipment creation and dispatch deductions, followed by reservation expiry with order coordination.
 2. Add orders and shipments to complete one fulfillment workflow.
 3. Add OIDC authentication and authenticated tenant isolation.
 4. Build a React and TypeScript interface for that workflow.

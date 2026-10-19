@@ -34,10 +34,37 @@ requested stock row is locked in the same product-ID order. This reduces deadloc
 risk when requests list the same products in opposite orders. If any item cannot
 be held, the whole transaction rolls back, including earlier item changes.
 
-The client reuses a request ID for retries. An identical retry returns the existing
+For standalone reservations, the client reuses a request ID for retries. An identical retry returns the existing
 reservation. Changing the items with that ID returns a conflict. Release locks the
 reservation before returning its units, so two release requests cannot return the
 same hold twice. The lifecycle is `ACTIVE -> RELEASED`; there is no delete API.
+
+## Order and inventory integration
+
+Follow `OrderController -> OrderService -> ReservationService` for the first
+cross-module workflow. OrderService claims the tenant/request key with PostgreSQL
+`INSERT ... ON CONFLICT DO NOTHING`. Identical concurrent requests wait for the
+first transaction, then read the existing order instead of creating another hold.
+An order ID is generated internally and used as its private inventory retry key.
+
+Creation stores product SKU/name snapshots and changes the temporary `PENDING`
+row to `CONFIRMED` after the stock hold is created. Every write uses the same
+transaction; any failure rolls back both modules. Cancellation locks the order,
+then its reservation, then stock in consistent product order. It releases the hold
+and marks the order `CANCELLED` together. Repeated cancellation does not return
+units twice.
+
+Reservations owned by orders carry an `ownerOrderId`. Inventory checks that owner
+in both reservation replay and release operations. This prevents the standalone
+reservation HTTP API from releasing a hold while its order remains confirmed.
+Inventory still owns its tables; the order module calls inventory services rather
+than querying those tables. Cross-module identifiers are not cross-module foreign
+keys, so future service extraction remains possible.
+
+`OrderActivityLogger` uses the same after-commit pattern as inventory logging.
+Customer references and product names are not included in application log messages.
+These synchronous module calls are not a distributed saga. Extracting services
+will require durable commands/events and compensation for failure handling.
 
 ## Comments and readability
 
@@ -85,7 +112,7 @@ messages, a Kafka outbox, or delivery guarantees to another service.
 
 ## Current boundaries
 
-Authentication and actor attribution are not implemented yet. Reservations require
-explicit release; expiration, order ownership, partial release, and dispatch are
-future work. Keep this application local until authenticated tenant isolation is
+Authentication and actor attribution are not implemented yet. Standalone reservations
+require explicit release; order-owned holds must be released through order cancellation.
+Expiration, partial release, shipments, and dispatch remain future work. Keep this application local until authenticated tenant isolation is
 implemented. See the README for runnable API examples and the next milestones.

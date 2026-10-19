@@ -19,6 +19,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Objects;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -47,6 +48,16 @@ public class ReservationService {
     /** Lock every stock row before checking availability; any failure rolls back the whole hold. */
     @Transactional
     public Result reserve(UUID tenantId, UUID warehouseId, CreateReservationRequest request) {
+        return reserveInternal(tenantId, warehouseId, request, null);
+    }
+
+    /** Used by OrderService within its transaction; an order UUID is also its private reservation retry key. */
+    @Transactional
+    public Result reserveForOrder(UUID tenantId, UUID warehouseId, UUID orderId, CreateReservationRequest request) {
+        return reserveInternal(tenantId, warehouseId, request, Objects.requireNonNull(orderId));
+    }
+
+    private Result reserveInternal(UUID tenantId, UUID warehouseId, CreateReservationRequest request, UUID orderId) {
         warehouses.getWarehouseById(tenantId, warehouseId);
         Map<UUID, Integer> requested = new TreeMap<>();
         for (var item : request.items()) {
@@ -60,6 +71,7 @@ public class ReservationService {
         var previous = reservations.findByTenantIdAndWarehouseIdAndRequestId(tenantId, warehouseId, request.requestId());
         if (previous.isPresent()) {
             var existing = previous.get();
+            requireOwner(existing, orderId);
             var originalItems = items.findByTenantIdAndReservationIdOrderByProductIdAsc(tenantId, existing.getId());
             Map<UUID, Integer> original = new TreeMap<>();
             originalItems.forEach(item -> original.put(item.getProductId(), item.getQuantity()));
@@ -72,7 +84,7 @@ public class ReservationService {
 
         requested.forEach((product, quantity) -> locked.get(product).reserve(quantity));
         // Flush the parent first to enforce the unique request key before persisting child rows.
-        var reservation = reservations.saveAndFlush(new InventoryReservation(tenantId, warehouseId, request.requestId()));
+        var reservation = reservations.saveAndFlush(new InventoryReservation(tenantId, warehouseId, request.requestId(), orderId));
         var savedItems = items.saveAll(requested.entrySet().stream()
                 .map(item -> new ReservationItem(tenantId, reservation.getId(), item.getKey(), item.getValue())).toList());
         events.publishEvent(new InventoryActivity("RESERVATION_CREATED", tenantId, warehouseId, reservation.getId()));
@@ -82,9 +94,20 @@ public class ReservationService {
     /** Releasing twice is safe: only the first ACTIVE -> RELEASED transition returns units. */
     @Transactional
     public ReservationResponse release(UUID tenantId, UUID warehouseId, UUID reservationId) {
+        return releaseInternal(tenantId, warehouseId, reservationId, null);
+    }
+
+    /** Order cancellation must release the hold and cancel the order in the same transaction. */
+    @Transactional
+    public ReservationResponse releaseForOrder(UUID tenantId, UUID warehouseId, UUID reservationId, UUID orderId) {
+        return releaseInternal(tenantId, warehouseId, reservationId, Objects.requireNonNull(orderId));
+    }
+
+    private ReservationResponse releaseInternal(UUID tenantId, UUID warehouseId, UUID reservationId, UUID orderId) {
         warehouses.getWarehouseById(tenantId, warehouseId);
         var reservation = reservations.findForUpdate(reservationId, tenantId, warehouseId)
                 .orElseThrow(ReservationNotFoundException::new);
+        requireOwner(reservation, orderId);
         var originalItems = items.findByTenantIdAndReservationIdOrderByProductIdAsc(tenantId, reservationId);
         if (!reservation.isActive()) {
             log.debug("Reservation release replay: tenantId={} reservationId={}", tenantId, reservationId);
@@ -108,6 +131,12 @@ public class ReservationService {
         log.debug("Reservation lookup: tenantId={} reservationId={}", tenantId, reservationId);
         return ReservationResponse.from(reservation,
                 items.findByTenantIdAndReservationIdOrderByProductIdAsc(tenantId, reservationId));
+    }
+
+    private void requireOwner(InventoryReservation reservation, UUID orderId) {
+        if (!Objects.equals(reservation.getOwnerOrderId(), orderId)) {
+            throw new ReservationConflictException("Order-owned reservations must be changed through their order");
+        }
     }
 
     private Map<UUID, Stock> lockStocks(UUID tenantId, UUID warehouseId, Map<UUID, Integer> requested) {

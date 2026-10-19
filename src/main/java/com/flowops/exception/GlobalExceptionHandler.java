@@ -1,6 +1,8 @@
 
 package com.flowops.exception;
 
+import com.flowops.order.exception.OrderNotFoundException;
+import com.flowops.order.exception.OrderConflictException;
 import com.flowops.inventory.exception.ReservationNotFoundException;
 import com.flowops.inventory.exception.ReservationConflictException;
 import org.slf4j.Logger;
@@ -29,7 +31,7 @@ import java.util.Map;
 public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-    @ExceptionHandler({WarehouseNotFoundException.class, ProductNotFoundException.class, StockNotFoundException.class, ReservationNotFoundException.class})
+    @ExceptionHandler({WarehouseNotFoundException.class, ProductNotFoundException.class, StockNotFoundException.class, ReservationNotFoundException.class, OrderNotFoundException.class})
     public ResponseEntity<Map<String, String>> handleNotFound(
             RuntimeException ex) {
         log.debug("Request rejected: exceptionType={}", ex.getClass().getSimpleName());
@@ -68,7 +70,7 @@ public class GlobalExceptionHandler {
     }
     
     
-	@ExceptionHandler({DuplicateWarehouseException.class, DuplicateProductException.class, DuplicateStockException.class, StockMovementConflictException.class, ReservationConflictException.class})
+	@ExceptionHandler({DuplicateWarehouseException.class, DuplicateProductException.class, DuplicateStockException.class, StockMovementConflictException.class, ReservationConflictException.class, OrderConflictException.class})
 	public ResponseEntity<Map<String, String>> handleDuplicate(RuntimeException ex) {
         log.debug("Request rejected: exceptionType={}", ex.getClass().getSimpleName());
 
