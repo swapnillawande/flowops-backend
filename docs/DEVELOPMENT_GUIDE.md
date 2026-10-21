@@ -165,3 +165,16 @@ Preparation, dispatch, and cancellation use the same history recorder. Sequence
 numbers are allocated while the parent mutation lock is held, so equal timestamps
 cannot reorder the timeline. The V9 upgrade test checks that stored dispatch
 timestamps become auditable history without altering shipment state.
+
+## React client boundary
+
+The `frontend/` directory owns browser state and presentation; Java services still
+own all business decisions. Vite forwards same-origin `/api` requests locally to
+Spring Boot. No tenant selector or tenant ID input exists in the browser.
+
+The API wrapper surfaces backend validation/conflict messages instead of silently
+substituting fake data. Forms disable pending submissions and keep their retry ID
+stable for unchanged payloads. After success, the console reloads server state.
+Use the frontend README for setup and file responsibilities. The UI uses native
+dialog focus handling, labeled controls, status text alongside color, and responsive
+CSS breakpoints. Desktop browser QA covers a full workflow on a separate database.

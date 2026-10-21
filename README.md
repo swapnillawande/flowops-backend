@@ -3,8 +3,30 @@
 A logistics platform being built step by step with Java 21 and Spring Boot.
 The current milestone includes PostgreSQL-backed warehouse, product catalog, and
 stock balances, movements, reservations, orders, shipment preparation, and dispatch.
-Manual delivery updates and shipment history are implemented. React, Kafka, Ollama,
-and Kubernetes are subsequent milestones.
+Manual delivery updates, shipment history, and a React operations console are
+implemented. Kafka, Ollama, authentication, and Kubernetes remain future milestones.
+
+## React operations console
+
+![FlowOps dashboard with a test delivery](docs/images/dashboard.png)
+
+The `frontend/` application includes Overview, Orders, Shipments, and Catalog &
+stock screens, plus the complete create/reserve/prepare/dispatch/deliver flow.
+It displays real API records, with empty, loading, and error states. The screenshot
+shows records created in an isolated QA database; they are not automatically seeded.
+
+Start the backend below, then in another terminal:
+
+```sh
+cd frontend
+npm ci
+npm run dev
+```
+
+Open Vite's printed Local URL, normally http://127.0.0.1:5173. See the
+[frontend guide](frontend/README.md) for first-use steps, proxy configuration,
+checks, and current limits. React uses [Vite](https://vite.dev/guide/) as its build
+and local development server, following the [React setup guidance](https://react.dev/learn/build-a-react-app-from-scratch).
 
 ## Run locally
 
@@ -407,7 +429,7 @@ dispatch, tenant scope, and upgrading confirmed orders with active holds from V7
 
 ## Next milestones
 
-1. Add a React operations console, followed by reservation expiry with order coordination.
+1. Extend the UI with stock movements and order detail views; add authenticated tenant isolation before public deployment.
 2. Add orders and shipments to complete one fulfillment workflow.
 3. Add OIDC authentication and authenticated tenant isolation.
 4. Build a React and TypeScript interface for that workflow.
