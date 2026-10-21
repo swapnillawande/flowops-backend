@@ -1027,3 +1027,168 @@ label small {
     grid-template-columns: minmax(0, 1fr) 65px 25px;
   }
 }
+
+/* Detail dialogs and stock ledgers share the existing console's quiet visual language. */
+.order-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-weight: 600;
+  color: #346e64;
+  text-align: left;
+}
+.detail-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.detail-heading strong {
+  font-size: 16px;
+}
+.detail-heading .help {
+  margin: 7px 0 0;
+}
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 20px 0;
+  margin: 0 0 25px;
+}
+.detail-grid dt {
+  font-size: 10px;
+  color: #8b9b98;
+  margin-bottom: 6px;
+}
+.detail-grid dd {
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.detail-table table {
+  min-width: 430px;
+}
+.detail-total {
+  display: flex;
+  justify-content: space-between;
+  padding: 18px;
+  font-size: 12px;
+  background: #f3f8f5;
+  border-radius: 7px;
+  margin-top: 14px;
+}
+.balance-preview {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 17px 0;
+}
+.balance-preview span {
+  background: #f2f7f5;
+  padding: 14px;
+  border-radius: 7px;
+  font-size: 10px;
+  color: #7a8f87;
+}
+.balance-preview strong {
+  display: block;
+  font-size: 21px;
+  color: #3d6c5f;
+  margin-top: 6px;
+}
+.change-preview {
+  background: #eef6f1;
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: #537e69;
+  margin-bottom: 18px;
+}
+.change-preview.invalid {
+  background: #fff2ed;
+  color: #a66b54;
+}
+.movement-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.movement-list li {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+.movement-list li:first-child {
+  padding-top: 0;
+}
+.movement-list li:last-child {
+  border: 0;
+}
+.movement-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  text-transform: capitalize;
+  font-size: 12px;
+}
+.quantity {
+  font-weight: 600;
+  font-size: 12px;
+}
+.quantity.positive {
+  color: #36856c;
+}
+.quantity.negative {
+  color: #ae7167;
+}
+.movement-list p {
+  font-size: 12px;
+  color: #667e78;
+  margin: 8px 0;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.movement-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 10px;
+  color: #93a29d;
+  flex-wrap: wrap;
+}
+.movement-shipment {
+  display: block;
+  font-size: 9px;
+  color: #9ba9a4;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.read-error {
+  margin-bottom: 18px;
+}
+.read-error button {
+  font-size: 11px;
+}
+@media (max-width: 550px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+  .balance-preview {
+    gap: 7px;
+  }
+  .balance-preview span {
+    padding: 12px;
+  }
+  .movement-meta {
+    display: block;
+  }
+  .movement-meta time {
+    display: block;
+    margin-top: 5px;
+  }
+}

@@ -29,15 +29,19 @@ import {
 import {
   CatalogForms,
   OpeningForm,
+  StockMovementForm,
   OrderForm,
   PrepareForm,
   StatusForm,
 } from "./forms";
 import type { Order, Page, Product, Shipment, Stock, Warehouse } from "./types";
 
+import { OrderDetails, MovementHistory } from "./details";
+
 type Tab = "overview" | "orders" | "shipments" | "catalog";
 type Dialog =
   | { kind: "order" }
+  | { kind: "order-details"; id: string }
   | { kind: "prepare"; order: Order }
   | { kind: "history"; shipment: Shipment }
   | { kind: "status"; shipment: Shipment }
@@ -154,7 +158,15 @@ export default function App() {
             {rows.map((order) => (
               <tr key={order.id}>
                 <td>
-                  <strong>#{short(order.id)}</strong>
+                  <button
+                    className="order-link"
+                    onClick={() =>
+                      setDialog({ kind: "order-details", id: order.id })
+                    }
+                  >
+                    #{short(order.id)}
+                    <ArrowUpRight size={13} />
+                  </button>
                   <small>{order.customerReference}</small>
                 </td>
                 <td>{warehouseName(order.warehouseId)}</td>
@@ -559,17 +571,22 @@ export default function App() {
         <Modal
           close={() => setDialog(null)}
           title={
-            dialog.kind === "order"
-              ? "Create order"
-              : dialog.kind === "prepare"
-                ? "Prepare shipment"
-                : dialog.kind === "history"
-                  ? "Shipment timeline"
-                  : dialog.kind === "status"
-                    ? "Update delivery status"
-                    : dialog.title
+            dialog.kind === "order-details"
+              ? "Order details"
+              : dialog.kind === "order"
+                ? "Create order"
+                : dialog.kind === "prepare"
+                  ? "Prepare shipment"
+                  : dialog.kind === "history"
+                    ? "Shipment timeline"
+                    : dialog.kind === "status"
+                      ? "Update delivery status"
+                      : dialog.title
           }
         >
+          {dialog.kind === "order-details" && (
+            <OrderDetails id={dialog.id} warehouses={warehouses} />
+          )}
           {dialog.kind === "order" && (
             <OrderForm
               warehouses={warehouses}
@@ -623,6 +640,11 @@ function Inventory({
     [stock, setStock] = useState<Stock[]>([]),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(false);
+  const [stockDialog, setStockDialog] = useState<{
+    kind: "movement" | "history";
+    warehouseId: string;
+    productId: string;
+  } | null>(null);
   const selected = warehouseId || warehouses[0]?.id || "";
   useEffect(() => {
     if (!selected) return;
@@ -686,6 +708,7 @@ function Inventory({
                     <th>On hand</th>
                     <th>Reserved</th>
                     <th>Available</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -710,6 +733,32 @@ function Inventory({
                       <td>
                         <strong className="available">{item.available}</strong>
                       </td>
+                      <td>
+                        <div className="row-actions">
+                          <button
+                            onClick={() =>
+                              setStockDialog({
+                                kind: "movement",
+                                warehouseId: selected,
+                                productId: item.productId,
+                              })
+                            }
+                          >
+                            Record movement
+                          </button>
+                          <button
+                            onClick={() =>
+                              setStockDialog({
+                                kind: "history",
+                                warehouseId: selected,
+                                productId: item.productId,
+                              })
+                            }
+                          >
+                            History
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -730,6 +779,42 @@ function Inventory({
           />
         </div>
       </div>
+      {stockDialog && (
+        <Modal
+          title={
+            stockDialog.kind === "movement"
+              ? "Record stock movement"
+              : "Stock movement history"
+          }
+          close={() => setStockDialog(null)}
+        >
+          <p className="help">
+            {products.find((product) => product.id === stockDialog.productId)
+              ?.name || short(stockDialog.productId)}{" "}
+            ·{" "}
+            {
+              warehouses.find(
+                (warehouse) => warehouse.id === stockDialog.warehouseId,
+              )?.name
+            }
+          </p>
+          {stockDialog.kind === "movement" ? (
+            <StockMovementForm
+              warehouseId={stockDialog.warehouseId}
+              productId={stockDialog.productId}
+              done={() => {
+                setStockDialog(null);
+                done();
+              }}
+            />
+          ) : (
+            <MovementHistory
+              warehouseId={stockDialog.warehouseId}
+              productId={stockDialog.productId}
+            />
+          )}
+        </Modal>
+      )}
     </section>
   );
 }

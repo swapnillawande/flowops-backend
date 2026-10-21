@@ -47,6 +47,10 @@ Authentication is not implemented; keep both services local.
 4. In **Orders**, prepare a shipment with a carrier label.
 5. In **Shipments**, dispatch it, then mark it in transit and delivered with notes.
 6. Select the tracking number or **View history** to see its timeline.
+7. Select an order number to read its original product snapshots, reservation ID,
+   and lifecycle timestamps.
+8. In **Catalog & stock**, use **Record movement** for receipts or signed adjustments,
+   and **History** to inspect physical balance changes.
 
 Order cancellation asks for confirmation and releases stock through the backend.
 Dispatch asks for confirmation because it deducts physical stock and prevents
@@ -70,7 +74,9 @@ checking before bundling. `npm run preview` serves the build for local inspectio
 - `types.ts`: typed public API contracts.
 - `api.ts`: fetch, JSON parsing, and actionable server/network errors.
 - `App.tsx`: navigation, paginated resources, tables, and action orchestration.
-- `forms.tsx`: catalog, stock, order, shipment, and delivery forms.
+- `forms.tsx`: catalog, stock, order, shipment, delivery, and physical movement forms.
+- `details.tsx`: canonical order snapshots and stock movement ledger dialogs.
+- `useResource.ts`: abortable reads with stale-response protection and explicit retry.
 - `components.tsx`: status badges, accessible dialogs, paging, history, mutation state.
 - `styles.css`: shared visual tokens and responsive layout breakpoints.
 
@@ -83,6 +89,29 @@ there is no live push channel yet.
 
 The overview shows server-reported order/shipment totals. Tables and activity show
 the current page; no delivery-rate or other aggregate metrics are invented. Catalog
-lists are currently unpaginated, matching the backend's local-demo API. Full catalog
-editing, stock receipts/adjustments UI, authentication, and automatic/live tracking
-are later milestones.
+lists are currently unpaginated, matching the backend's local-demo API. Full catalog editing, authentication, and automatic/live tracking are later milestones.
+
+## Inventory changes and detail views
+
+![Stock movement history from isolated QA records](../docs/images/inventory-history.png)
+
+Order numbers open the server's current order detail, rather than reusing a list
+row. Product names and SKUs come from the original order snapshot. Errors provide
+a retry action without closing the dialog.
+
+Stock movements load the current product/warehouse balance. Receipts require a
+positive quantity; adjustments use a nonzero signed quantity. A reason is required
+and is retained in the audit ledger. The preview shows resulting physical and free
+units. The server remains authoritative if stock changes concurrently.
+
+New deductions that would consume reserved stock, or additions exceeding integer
+capacity, are rejected by the form. An exact retry of a previously submitted
+command is sent with its original key even after refreshing the balance: a
+response-lost command may already be reflected in that balance, and only the
+server can distinguish a replay from a new change. Keep that form open after an
+ambiguous network failure rather than starting a new command.
+
+History displays opening balances, receipts, adjustments, and shipment deductions
+with signed quantities, reasons, timestamps, and before/after balances. Reasons
+are rendered as plain text. Reservations are not physical movements and therefore
+do not appear in this ledger. Read and write failures are shown explicitly.

@@ -178,3 +178,17 @@ stable for unchanged payloads. After success, the console reloads server state.
 Use the frontend README for setup and file responsibilities. The UI uses native
 dialog focus handling, labeled controls, status text alongside color, and responsive
 CSS breakpoints. Desktop browser QA covers a full workflow on a separate database.
+
+## Stock movement UI and ambiguous retries
+
+`OrderDetails` fetches the canonical order DTO so list pagination or an earlier
+status cannot become its source of truth. `MovementHistory` reads only the selected
+warehouse/product ledger. `useResource` aborts and discards superseded requests,
+clears old data during reload, and gives the user a recovery action on failure.
+
+StockMovementForm captures a specific warehouse/product when opened, fetches the
+current balance, and validates whole units, audit reasons, and initial capacity
+checks. It preserves an unchanged command's retry key. After a lost response,
+a refreshed balance could already include that command; the form therefore lets
+the original key reach the backend on replay instead of incorrectly applying new-
+command availability checks. The server still locks and validates new movements.

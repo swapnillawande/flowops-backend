@@ -12,7 +12,9 @@ implemented. Kafka, Ollama, authentication, and Kubernetes remain future milesto
 
 The `frontend/` application includes Overview, Orders, Shipments, and Catalog &
 stock screens, plus the complete create/reserve/prepare/dispatch/deliver flow.
-It displays real API records, with empty, loading, and error states. The screenshot
+Order numbers open full detail snapshots. Catalog stock rows support receipts,
+adjustments, balance previews, and movement history. The console displays real
+API records, with empty, loading, and error states. The screenshot
 shows records created in an isolated QA database; they are not automatically seeded.
 
 Start the backend below, then in another terminal:
@@ -429,7 +431,7 @@ dispatch, tenant scope, and upgrading confirmed orders with active holds from V7
 
 ## Next milestones
 
-1. Extend the UI with stock movements and order detail views; add authenticated tenant isolation before public deployment.
+1. Add authenticated tenant isolation before public deployment, followed by reservation expiry coordinated with orders.
 2. Add orders and shipments to complete one fulfillment workflow.
 3. Add OIDC authentication and authenticated tenant isolation.
 4. Build a React and TypeScript interface for that workflow.

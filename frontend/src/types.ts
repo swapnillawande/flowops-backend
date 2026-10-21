@@ -61,3 +61,22 @@ export interface Page<T> {
   totalElements: number;
   totalPages: number;
 }
+
+/** Exact public order detail fields, distinct from the smaller table view. */
+export interface OrderDetail extends Order {
+  requestId: string;
+  reservationId: string;
+  dispatchedAt: string | null;
+  deliveredAt: string | null;
+  cancelledAt: string | null;
+}
+export interface StockMovement {
+  id: string;
+  type: "OPENING" | "RECEIPT" | "ADJUSTMENT" | "DISPATCH";
+  quantity: number;
+  onHandBefore: number;
+  onHandAfter: number;
+  reason: string;
+  shipmentId: string | null;
+  createdAt: string;
+}

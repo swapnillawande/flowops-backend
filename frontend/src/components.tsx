@@ -132,17 +132,19 @@ export function MutationForm({
   children,
   button = "Save",
   busyLabel = "Saving…",
+  disabled = false,
 }: {
   submit: () => Promise<void>;
   children: ReactNode;
   button?: string;
   busyLabel?: string;
+  disabled?: boolean;
 }) {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   async function handle(event: FormEvent) {
     event.preventDefault();
-    if (busy) return;
+    if (busy || disabled) return;
     setBusy(true);
     setError("");
     try {
@@ -161,7 +163,7 @@ export function MutationForm({
           {error}
         </p>
       )}
-      <button className="primary submit" disabled={busy}>
+      <button className="primary submit" disabled={busy || disabled}>
         {busy && <LoaderCircle size={16} className="spin" />}
         {busy ? busyLabel : button}
       </button>

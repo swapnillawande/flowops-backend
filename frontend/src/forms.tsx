@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useResource } from "./useResource";
+import { ReadError } from "./details";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { api, post } from "./api";
 import { MutationForm, useRetryKey } from "./components";
@@ -417,6 +419,144 @@ export function OpeningForm({
           step={1}
           value={quantity}
           onChange={(e) => setQuantity(Number(e.target.value))}
+        />
+      </label>
+    </MutationForm>
+  );
+}
+
+/** Preview against a freshly loaded balance; the backend still checks locks, limits, and held units. */
+export function StockMovementForm({
+  warehouseId,
+  productId,
+  done,
+}: {
+  warehouseId: string;
+  productId: string;
+  done: () => void;
+}) {
+  const [type, setType] = useState<"RECEIPT" | "ADJUSTMENT">("RECEIPT");
+  const [quantity, setQuantity] = useState("");
+  const [reason, setReason] = useState("");
+  const keyFor = useRetryKey();
+  const lastSubmitted = useRef("");
+  const {
+    data: balance,
+    loading,
+    error,
+    reload,
+  } = useResource<Stock>(`/warehouses/${warehouseId}/stock/${productId}`);
+  const delta = Number(quantity);
+  const validNumber = quantity !== "" && Number.isInteger(delta) && delta !== 0;
+  const after = balance && validNumber ? balance.onHand + delta : undefined;
+  return (
+    <MutationForm
+      button="Record movement"
+      disabled={loading || !balance}
+      submit={async () => {
+        if (!balance)
+          throw new Error("Load the current balance before changing stock.");
+        if (
+          !validNumber ||
+          delta < -2147483648 ||
+          delta > 2147483647 ||
+          (type === "RECEIPT" && delta < 0)
+        )
+          throw new Error(
+            "Use a positive whole-number receipt or a nonzero signed adjustment.",
+          );
+        const payload = { type, quantity: delta, reason: reason.trim() };
+        const fingerprint = JSON.stringify(payload);
+        // A refreshed balance may already include a response-lost command. Let its original key replay on the server.
+        const replay = lastSubmitted.current === fingerprint;
+        if (!replay && balance.onHand + delta < balance.reserved)
+          throw new Error(
+            "This change would consume reserved stock. Refresh the balance or enter a smaller deduction.",
+          );
+        if (!replay && balance.onHand + delta > 2147483647)
+          throw new Error(
+            "This change exceeds the maximum supported stock balance.",
+          );
+        if (!payload.reason)
+          throw new Error("A reason is required for the audit trail.");
+        lastSubmitted.current = fingerprint;
+        await post(`/warehouses/${warehouseId}/stock/${productId}/movements`, {
+          ...payload,
+          requestId: keyFor(payload),
+        });
+        done();
+      }}
+    >
+      <p className="help">
+        Receipts add delivered units. Adjustments record signed corrections.
+        Every change keeps its reason and before/after balance.
+      </p>
+      {loading ? (
+        <p role="status">Loading current balance…</p>
+      ) : error ? (
+        <ReadError message={error} retry={reload} />
+      ) : (
+        balance && (
+          <div className="balance-preview">
+            <span>
+              On hand <strong>{balance.onHand}</strong>
+            </span>
+            <span>
+              Reserved <strong>{balance.reserved}</strong>
+            </span>
+            <span>
+              Available <strong>{balance.available}</strong>
+            </span>
+          </div>
+        )
+      )}
+      <button type="button" className="text-button" onClick={reload}>
+        Refresh balance
+      </button>
+      <label>
+        Movement type
+        <select
+          value={type}
+          onChange={(event) =>
+            setType(event.target.value as "RECEIPT" | "ADJUSTMENT")
+          }
+        >
+          <option value="RECEIPT">Receipt — add units</option>
+          <option value="ADJUSTMENT">Adjustment — signed correction</option>
+        </select>
+      </label>
+      <label>
+        Quantity change
+        <input
+          required
+          type="number"
+          step={1}
+          min={type === "RECEIPT" ? 1 : -2147483648}
+          max={2147483647}
+          value={quantity}
+          onChange={(event) => setQuantity(event.target.value)}
+          placeholder={
+            type === "RECEIPT" ? "e.g. 10" : "e.g. -2 for damaged units"
+          }
+        />
+      </label>
+      {after !== undefined && balance && (
+        <p
+          className={`change-preview ${after < balance.reserved || after > 2147483647 ? "invalid" : ""}`}
+        >
+          After this change: <strong>{after} on hand</strong>,{" "}
+          {after - balance.reserved} available. The server rechecks the balance
+          when saving.
+        </p>
+      )}
+      <label>
+        Reason
+        <textarea
+          required
+          maxLength={250}
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="e.g. Supplier delivery received, or 2 damaged units removed"
         />
       </label>
     </MutationForm>
