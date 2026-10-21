@@ -18,6 +18,7 @@ public class CustomerOrder {
     @Column(name = "reservation_id") private UUID reservationId;
     @Column(name = "created_at", nullable = false) private OffsetDateTime createdAt;
     @Column(name = "dispatched_at") private OffsetDateTime dispatchedAt;
+    @Column(name = "delivered_at") private OffsetDateTime deliveredAt;
     @Column(name = "cancelled_at") private OffsetDateTime cancelledAt;
 
     protected CustomerOrder() {} // Creation uses the repository's atomic request-key claim.
@@ -44,6 +45,12 @@ public class CustomerOrder {
     }
 
     public OffsetDateTime getDispatchedAt() { return dispatchedAt; }
+    /** Delivery completes fulfillment; stock was deducted at dispatch and is never deducted here. */
+    public void deliver() {
+        if (!"DISPATCHED".equals(status)) throw new IllegalStateException("Only dispatched orders can be delivered");
+        status = "DELIVERED"; deliveredAt = OffsetDateTime.now(ZoneOffset.UTC);
+    }
+    public OffsetDateTime getDeliveredAt() { return deliveredAt; }
     public UUID getId() { return id; }
     public UUID getRequestId() { return requestId; }
     public UUID getWarehouseId() { return warehouseId; }

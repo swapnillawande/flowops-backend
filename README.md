@@ -3,7 +3,8 @@
 A logistics platform being built step by step with Java 21 and Spring Boot.
 The current milestone includes PostgreSQL-backed warehouse, product catalog, and
 stock balances, movements, reservations, orders, shipment preparation, and dispatch.
-Delivery tracking, React, Kafka, Ollama, and Kubernetes are planned; they are not yet implemented.
+Manual delivery updates and shipment history are implemented. React, Kafka, Ollama,
+and Kubernetes are subsequent milestones.
 
 ## Run locally
 
@@ -332,8 +333,34 @@ Stock deductions, audit entries, reservation consumption, order status, and ship
 status use one local database transaction. Any write failure rolls the entire
 operation back. Synchronous order-cancellation listeners participate in that same
 transaction; commit-aware activity listeners log only successful changes. These
-are in-process events, not durable Kafka messages. Delivery updates, shipment event
-history, carrier APIs, returns, and partial fulfillment remain future work.
+are in-process events, not durable Kafka messages. Carrier APIs, returns, and partial fulfillment remain future work.
+
+## Delivery updates and shipment history
+
+After dispatch, shipments progress through `DISPATCHED -> IN_TRANSIT -> DELIVERED`.
+Operators use `POST /api/v1/shipments/{shipmentId}/status` with a request UUID,
+`status` (`IN_TRANSIT` or `DELIVERED`), and a trimmed, nonblank `note` of up to 250
+characters. Skipping or regressing states returns `409`. Delivery marks the order
+`DELIVERED` in the same transaction; it does not deduct stock again.
+
+Example body:
+
+```json
+{"requestId":"<new UUID>","status":"IN_TRANSIT","note":"Departed the distribution hub"}
+```
+
+`GET /api/v1/shipments/{shipmentId}/history` returns status events in sequence order.
+Preparation, dispatch, and cancellation also create events. Migration V9 reconstructs
+existing prepared/dispatched/cancelled events from stored timestamps without
+inventing carrier updates. Notes are audit data and are excluded from application
+logs. No public history edit/delete API exists.
+
+An identical status request replay returns the original event with `200`, even if
+the shipment has since progressed. Reusing its ID with another note/status returns
+`409`. A new request ID targeting the same current status is a conflict. Late
+retries of dispatch return the current shipment without repeating stock deductions.
+History and status updates are tenant-scoped; an inaccessible ID returns `404`.
+These are manual operator updates, not an external carrier webhook or GPS feed.
 
 ## Verify
 
@@ -380,7 +407,7 @@ dispatch, tenant scope, and upgrading confirmed orders with active holds from V7
 
 ## Next milestones
 
-1. Add shipment status history and delivery updates, followed by reservation expiry with order coordination.
+1. Add a React operations console, followed by reservation expiry with order coordination.
 2. Add orders and shipments to complete one fulfillment workflow.
 3. Add OIDC authentication and authenticated tenant isolation.
 4. Build a React and TypeScript interface for that workflow.

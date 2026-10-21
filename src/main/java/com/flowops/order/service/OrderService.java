@@ -124,6 +124,15 @@ public class OrderService {
         events.publishEvent(new OrderActivity("ORDER_DISPATCHED", tenantId, orderId));
     }
 
+    /** Called only by shipment progression, in the same transaction as its history entry. */
+    @Transactional
+    public void deliverForShipment(UUID tenantId, UUID orderId) {
+        var order = orders.findForUpdate(orderId, tenantId).orElseThrow(OrderNotFoundException::new);
+        if (!"DISPATCHED".equals(order.getStatus())) throw new OrderConflictException("Only dispatched orders can be delivered");
+        order.deliver();
+        events.publishEvent(new OrderActivity("ORDER_DELIVERED", tenantId, orderId));
+    }
+
     @Transactional(readOnly = true)
     public OrderResponse get(UUID tenantId, UUID orderId) {
         log.debug("Order lookup: tenantId={} orderId={}", tenantId, orderId);

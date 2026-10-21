@@ -9,6 +9,7 @@ import com.flowops.product.entity.Product;
 import com.flowops.product.repository.ProductRepository;
 import com.flowops.shipment.dto.CreateShipmentRequest;
 import com.flowops.shipment.repository.ShipmentRepository;
+import com.flowops.shipment.repository.ShipmentStatusEventRepository;
 import com.flowops.shipment.service.ShipmentService;
 import com.flowops.support.PostgresIntegrationTest;
 import com.flowops.tenant.DemoTenant;
@@ -46,6 +47,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ShipmentApiTest extends PostgresIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired ShipmentRepository shipments;
+    @Autowired ShipmentStatusEventRepository history;
     @Autowired OrderRepository orders;
     @Autowired OrderItemRepository orderItems;
     @Autowired ReservationRepository reservations;
@@ -66,6 +68,7 @@ class ShipmentApiTest extends PostgresIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        history.deleteAllInBatch();
         shipments.deleteAllInBatch();
         orderItems.deleteAllInBatch();
         orders.deleteAllInBatch();
@@ -244,6 +247,9 @@ class ShipmentApiTest extends PostgresIntegrationTest {
         UUID otherOrder = newOrder(otherTenant, otherWarehouse, otherFirst, otherSecond);
         var other = shipmentService.create(otherTenant, new CreateShipmentRequest(otherOrder, "Private carrier")).response();
         mvc.perform(get("/api/v1/shipments/" + other.id())).andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/shipments/" + other.id() + "/history")).andExpect(status().isNotFound());
+        mvc.perform(post("/api/v1/shipments/" + other.id() + "/status").contentType(MediaType.APPLICATION_JSON)
+                .content(statusBody(UUID.randomUUID(), "IN_TRANSIT", "Private"))).andExpect(status().isNotFound());
         mvc.perform(post("/api/v1/shipments/" + other.id() + "/dispatch")).andExpect(status().isNotFound());
         mvc.perform(post("/api/v1/shipments").contentType(MediaType.APPLICATION_JSON).content(body(otherOrder, "Private carrier")))
                 .andExpect(status().isNotFound());
@@ -336,6 +342,117 @@ class ShipmentApiTest extends PostgresIntegrationTest {
         } finally {
             jdbc.execute("DROP SCHEMA IF EXISTS shipping_upgrade CASCADE");
         }
+    }
+
+    @Test
+    void deliveryProgressionUpdatesOrderAndRetainsStockAndHistory() throws Exception {
+        String location = prepare();
+        mvc.perform(post(location + "/dispatch")).andExpect(status().isOk());
+        UUID transit = UUID.randomUUID();
+        String transitBody = statusBody(transit, "IN_TRANSIT", "Departed hub");
+        String original = mvc.perform(post(location + "/status").contentType(MediaType.APPLICATION_JSON).content(transitBody))
+                .andExpect(status().isOk()).andExpect(jsonPath("sequence").value(3))
+                .andReturn().getResponse().getContentAsString();
+        mvc.perform(post(location + "/status").contentType(MediaType.APPLICATION_JSON)
+                        .content(statusBody(UUID.randomUUID(), "DELIVERED", "Delivered to recipient")))
+                .andExpect(status().isOk()).andExpect(jsonPath("sequence").value(4));
+        mvc.perform(get(location)).andExpect(jsonPath("status").value("DELIVERED"))
+                .andExpect(jsonPath("deliveredAt").exists());
+        mvc.perform(get(location + "/history")).andExpect(jsonPath("$.length()").value(4))
+                .andExpect(jsonPath("$[0].status").value("PREPARED"))
+                .andExpect(jsonPath("$[3].status").value("DELIVERED"));
+        assertEquals("DELIVERED", orders.findById(orderId).orElseThrow().getStatus());
+        balance(first, 7, 0);
+        assertEquals(2, movements.count());
+        mvc.perform(post(location + "/status").contentType(MediaType.APPLICATION_JSON).content(transitBody))
+                .andExpect(status().isOk()).andExpect(content().json(original));
+        // A delayed retry of dispatch must not deduct again after transit or delivery.
+        mvc.perform(post(location + "/dispatch")).andExpect(status().isOk()).andExpect(jsonPath("status").value("DELIVERED"));
+        mvc.perform(post("/api/v1/orders/" + orderId + "/cancel")).andExpect(status().isConflict());
+        balance(first, 7, 0);
+    }
+
+    @Test
+    void rejectsSkippedStatusesAndChangedRetryPayload() throws Exception {
+        String location = prepare();
+        mvc.perform(post(location + "/status").contentType(MediaType.APPLICATION_JSON)
+                .content(statusBody(UUID.randomUUID(), "IN_TRANSIT", "Too early"))).andExpect(status().isConflict());
+        mvc.perform(post(location + "/dispatch")).andExpect(status().isOk());
+        mvc.perform(post(location + "/status").contentType(MediaType.APPLICATION_JSON)
+                .content(statusBody(UUID.randomUUID(), "DELIVERED", "Cannot skip transit"))).andExpect(status().isConflict());
+        UUID request = UUID.randomUUID();
+        mvc.perform(post(location + "/status").contentType(MediaType.APPLICATION_JSON)
+                .content(statusBody(request, "IN_TRANSIT", "Departed"))).andExpect(status().isOk());
+        mvc.perform(post(location + "/status").contentType(MediaType.APPLICATION_JSON)
+                .content(statusBody(request, "IN_TRANSIT", "Changed note"))).andExpect(status().isConflict());
+        mvc.perform(post(location + "/status").contentType(MediaType.APPLICATION_JSON)
+                .content(statusBody(UUID.randomUUID(), "IN_TRANSIT", "Duplicate state"))).andExpect(status().isConflict());
+        assertEquals(3, history.count());
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void historyFailureRollsBackDeliveryAndSuppressesSuccessLog(CapturedOutput output) throws Exception {
+        String location = prepare();
+        mvc.perform(post(location + "/dispatch")).andExpect(status().isOk());
+        mvc.perform(post(location + "/status").contentType(MediaType.APPLICATION_JSON)
+                .content(statusBody(UUID.randomUUID(), "IN_TRANSIT", "Departed"))).andExpect(status().isOk());
+        jdbc.execute("ALTER TABLE shipment_status_events ADD CONSTRAINT test_no_delivery CHECK (status <> 'DELIVERED')");
+        try {
+            mvc.perform(post(location + "/status").contentType(MediaType.APPLICATION_JSON)
+                    .content(statusBody(UUID.randomUUID(), "DELIVERED", "Delivered"))).andExpect(status().isConflict());
+            assertEquals("DISPATCHED", orders.findById(orderId).orElseThrow().getStatus());
+            assertEquals("IN_TRANSIT", shipments.findAll().getFirst().getStatus());
+            assertEquals(3, history.count());
+            assertFalse(output.getOut().contains("operation=ORDER_DELIVERED"));
+            assertFalse(output.getOut().contains("operation=SHIPMENT_DELIVERED"));
+        } finally { jdbc.execute("ALTER TABLE shipment_status_events DROP CONSTRAINT test_no_delivery"); }
+    }
+
+    @Test
+    void concurrentStatusRetriesWriteOneEvent() throws Exception {
+        String location = prepare();
+        mvc.perform(post(location + "/dispatch")).andExpect(status().isOk());
+        String body = statusBody(UUID.randomUUID(), "IN_TRANSIT", "Departed");
+        Callable<Integer> update = () -> mvc.perform(post(location + "/status").contentType(MediaType.APPLICATION_JSON)
+                .content(body)).andReturn().getResponse().getStatus();
+        assertEquals(List.of(200, 200), concurrently(update, update));
+        assertEquals(3, history.count());
+    }
+
+    @Test
+    void statusValidationAndUnknownHistoryAreSafe() throws Exception {
+        String location = prepare();
+        for (String invalid : List.of("{}", statusBody(UUID.randomUUID(), "DELIVERED", " "),
+                statusBody(UUID.randomUUID(), "PREPARED", "Wrong command"),
+                statusBody(UUID.randomUUID(), "IN_TRANSIT", "X".repeat(251)))) {
+            mvc.perform(post(location + "/status").contentType(MediaType.APPLICATION_JSON).content(invalid))
+                    .andExpect(status().isBadRequest());
+        }
+        mvc.perform(get("/api/v1/shipments/" + UUID.randomUUID() + "/history")).andExpect(status().isNotFound());
+        assertEquals(1, history.count());
+    }
+
+    @Test
+    void migrationBackfillsPreparedAndDispatchedHistory() {
+        try {
+            Flyway.configure().dataSource(dataSource).schemas("history_upgrade").defaultSchema("history_upgrade")
+                    .target("8").load().migrate();
+            UUID oldShipment = UUID.randomUUID();
+            jdbc.update("""
+                    INSERT INTO history_upgrade.shipments
+                    (id, tenant_id, order_id, warehouse_id, tracking_number, carrier, status, created_at, dispatched_at)
+                    VALUES (?, ?, ?, ?, 'OLD-TRACK', 'Carrier', 'DISPATCHED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, oldShipment, DemoTenant.ID, UUID.randomUUID(), warehouse);
+            Flyway.configure().dataSource(dataSource).schemas("history_upgrade").defaultSchema("history_upgrade").load().migrate();
+            assertEquals(List.of("PREPARED", "DISPATCHED"), jdbc.queryForList(
+                    "SELECT status FROM history_upgrade.shipment_status_events ORDER BY sequence", String.class));
+            assertEquals("DISPATCHED", jdbc.queryForObject("SELECT status FROM history_upgrade.shipments", String.class));
+        } finally { jdbc.execute("DROP SCHEMA IF EXISTS history_upgrade CASCADE"); }
+    }
+
+    private String statusBody(UUID request, String status, String note) {
+        return "{\"requestId\":\"" + request + "\",\"status\":\"" + status + "\",\"note\":\"" + note + "\"}";
     }
 
     private UUID newOrder(UUID tenant, UUID location, UUID one, UUID two) {

@@ -98,7 +98,7 @@ consistency model with a durable workflow.
 Both cancellation and dispatch lock the same order first. Whichever commits first
 makes the other command invalid; a dispatched order needs a future returns flow,
 not cancellation. Internal tracking numbers and carrier labels do not represent
-real carrier bookings. Delivery events and partial shipping are not implemented.
+real carrier bookings. Manual delivery events are supported; live carrier integration and partial shipping are not implemented.
 
 ## Comments and readability
 
@@ -152,3 +152,16 @@ Expiration, partial release, delivery tracking, and returns remain future work.
 Full-order shipments and dispatch are implemented; cancelling prepared shipments
 is coordinated through order cancellation. Keep this application local until authenticated tenant isolation is
 implemented. See the README for runnable API examples and the next milestones.
+
+## Delivery progression and history
+
+Shipment status changes lock the order and shipment, validate the forward-only
+lifecycle, and append a sequenced status event in the same transaction. An event
+request ID is unique within tenant/shipment scope; identical retries return the
+original event before lifecycle validation. Delivery marks the order delivered
+without changing its already-consumed reservation or physical stock.
+
+Preparation, dispatch, and cancellation use the same history recorder. Sequence
+numbers are allocated while the parent mutation lock is held, so equal timestamps
+cannot reorder the timeline. The V9 upgrade test checks that stored dispatch
+timestamps become auditable history without altering shipment state.

@@ -3,6 +3,10 @@ package com.flowops.shipment.service;
 import com.flowops.order.event.OrderCancellation;
 import com.flowops.order.service.OrderService;
 import com.flowops.shipment.dto.CreateShipmentRequest;
+import com.flowops.shipment.dto.UpdateShipmentStatusRequest;
+import com.flowops.shipment.dto.ShipmentStatusEventResponse;
+import com.flowops.shipment.entity.ShipmentStatusEvent;
+import com.flowops.shipment.repository.ShipmentStatusEventRepository;
 import com.flowops.shipment.dto.ShipmentResponse;
 import com.flowops.shipment.entity.Shipment;
 import com.flowops.shipment.event.ShipmentActivity;
@@ -27,11 +31,14 @@ import java.util.UUID;
 public class ShipmentService {
     private static final Logger log = LoggerFactory.getLogger(ShipmentService.class);
     private final ShipmentRepository shipments;
+    private final ShipmentStatusEventRepository history;
     private final OrderService orders;
     private final ApplicationEventPublisher events;
 
-    public ShipmentService(ShipmentRepository shipments, OrderService orders, ApplicationEventPublisher events) {
+    public ShipmentService(ShipmentRepository shipments, OrderService orders, ApplicationEventPublisher events,
+                           ShipmentStatusEventRepository history) {
         this.shipments = shipments;
+        this.history = history;
         this.orders = orders;
         this.events = events;
     }
@@ -55,6 +62,7 @@ public class ShipmentService {
             throw new ShipmentConflictException("Only confirmed orders can have a new shipment");
         }
         var shipment = shipments.save(new Shipment(tenantId, order.id(), order.warehouseId(), request.carrier()));
+        record(tenantId, shipment, null, "Shipment prepared");
         events.publishEvent(new ShipmentActivity("SHIPMENT_PREPARED", tenantId, shipment.getId(), order.id()));
         return new Result(ShipmentResponse.from(shipment), true);
     }
@@ -65,7 +73,7 @@ public class ShipmentService {
         UUID orderId = shipments.findOrderId(shipmentId, tenantId).orElseThrow(ShipmentNotFoundException::new);
         orders.lockForFulfillment(tenantId, orderId);
         var shipment = shipments.findForUpdate(shipmentId, tenantId).orElseThrow(ShipmentNotFoundException::new);
-        if ("DISPATCHED".equals(shipment.getStatus())) {
+        if (shipment.getDispatchedAt() != null) {
             log.debug("Shipment dispatch replay: tenantId={} shipmentId={}", tenantId, shipmentId);
             return ShipmentResponse.from(shipment);
         }
@@ -74,6 +82,7 @@ public class ShipmentService {
         }
         orders.dispatchForShipment(tenantId, orderId, shipmentId);
         shipment.dispatch();
+        record(tenantId, shipment, null, "Shipment dispatched");
         events.publishEvent(new ShipmentActivity("SHIPMENT_DISPATCHED", tenantId, shipmentId, orderId));
         return ShipmentResponse.from(shipment);
     }
@@ -92,7 +101,43 @@ public class ShipmentService {
             throw new ShipmentConflictException("Dispatched shipments cannot be cancelled");
         }
         shipment.cancel();
+        record(cancellation.tenantId(), shipment, null, "Order cancelled before dispatch");
         events.publishEvent(new ShipmentActivity("SHIPMENT_CANCELLED", cancellation.tenantId(), shipment.getId(), shipment.getOrderId()));
+    }
+
+    /** Lock order first, then shipment. Retried transitions return their original event even after later progress. */
+    @Transactional
+    public ShipmentStatusEventResponse updateStatus(UUID tenantId, UUID shipmentId, UpdateShipmentStatusRequest request) {
+        UUID orderId = shipments.findOrderId(shipmentId, tenantId).orElseThrow(ShipmentNotFoundException::new);
+        orders.lockForFulfillment(tenantId, orderId);
+        var shipment = shipments.findForUpdate(shipmentId, tenantId).orElseThrow(ShipmentNotFoundException::new);
+        var previous = history.findByTenantIdAndShipmentIdAndRequestId(tenantId, shipmentId, request.requestId());
+        if (previous.isPresent()) {
+            var original = previous.get();
+            if (!original.getStatus().equals(request.status().name()) || !original.getNote().equals(request.note())) {
+                throw new ShipmentConflictException("Request ID was already used with different status details");
+            }
+            log.debug("Shipment status replay: tenantId={} shipmentId={}", tenantId, shipmentId);
+            return ShipmentStatusEventResponse.from(original);
+        }
+        shipment.advance(request.status().name());
+        if (request.status() == UpdateShipmentStatusRequest.Status.DELIVERED) orders.deliverForShipment(tenantId, orderId);
+        var event = record(tenantId, shipment, request.requestId(), request.note());
+        events.publishEvent(new ShipmentActivity("SHIPMENT_" + shipment.getStatus(), tenantId, shipmentId, orderId));
+        return ShipmentStatusEventResponse.from(event);
+    }
+
+    /** History is naturally bounded by this forward-only lifecycle and is returned in durable sequence order. */
+    @Transactional(readOnly = true)
+    public List<ShipmentStatusEventResponse> history(UUID tenantId, UUID shipmentId) {
+        shipments.findByIdAndTenantId(shipmentId, tenantId).orElseThrow(ShipmentNotFoundException::new);
+        return history.findByTenantIdAndShipmentIdOrderBySequenceAsc(tenantId, shipmentId).stream()
+                .map(ShipmentStatusEventResponse::from).toList();
+    }
+
+    private ShipmentStatusEvent record(UUID tenantId, Shipment shipment, UUID requestId, String note) {
+        return history.save(new ShipmentStatusEvent(tenantId, shipment,
+                history.lastSequence(tenantId, shipment.getId()) + 1, requestId, note));
     }
 
     @Transactional(readOnly = true)

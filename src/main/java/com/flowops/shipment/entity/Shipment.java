@@ -19,6 +19,8 @@ public class Shipment {
     @Column(nullable = false, length = 20) private String status;
     @Column(name = "created_at", nullable = false) private OffsetDateTime createdAt;
     @Column(name = "dispatched_at") private OffsetDateTime dispatchedAt;
+    @Column(name = "in_transit_at") private OffsetDateTime inTransitAt;
+    @Column(name = "delivered_at") private OffsetDateTime deliveredAt;
     @Column(name = "cancelled_at") private OffsetDateTime cancelledAt;
 
     protected Shipment() {}
@@ -44,6 +46,16 @@ public class Shipment {
         status = "CANCELLED";
         cancelledAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
+    /** No skipping or regressing states: physical dispatch must already have happened. */
+    public void advance(String next) {
+        if ("IN_TRANSIT".equals(next) && "DISPATCHED".equals(status)) {
+            status = next; inTransitAt = OffsetDateTime.now(ZoneOffset.UTC);
+        } else if ("DELIVERED".equals(next) && "IN_TRANSIT".equals(status)) {
+            status = next; deliveredAt = OffsetDateTime.now(ZoneOffset.UTC);
+        } else throw new ShipmentConflictException("Shipment status must progress from dispatched to in transit to delivered");
+    }
+    public OffsetDateTime getInTransitAt() { return inTransitAt; }
+    public OffsetDateTime getDeliveredAt() { return deliveredAt; }
     public UUID getId() { return id; }
     public UUID getOrderId() { return orderId; }
     public UUID getWarehouseId() { return warehouseId; }
