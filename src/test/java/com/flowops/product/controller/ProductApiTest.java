@@ -3,6 +3,8 @@ package com.flowops.product.controller;
 import com.flowops.product.entity.Product;
 import com.flowops.product.repository.ProductRepository;
 import com.flowops.support.PostgresIntegrationTest;
+import com.flowops.support.AuthenticatedApiTestConfiguration;
+import org.springframework.context.annotation.Import;
 import com.flowops.tenant.DemoTenant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(AuthenticatedApiTestConfiguration.class)
 class ProductApiTest extends PostgresIntegrationTest {
     private static final String PRODUCTS = "/api/v1/products";
 

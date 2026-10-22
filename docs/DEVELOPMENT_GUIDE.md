@@ -6,8 +6,8 @@ Start with `ReservationController`, then read `ReservationService`, `Stock`, and
 the reservation repositories. Their responsibilities are deliberately separate:
 
 1. The controller maps an HTTP URL to a Java method. `@Valid` checks request fields.
-   DTO records define what callers may send and receive. The trusted demo tenant
-   is supplied by the server, not accepted from request JSON.
+   DTO records define what callers may send and receive. Spring Security first verifies the bearer token; the controller resolves its
+   trusted tenant claim rather than accepting a tenant from request JSON.
 2. The service applies the business rules. `@Transactional` makes the reservation
    row, its items, and every affected stock balance commit or roll back together.
 3. Repositories load tenant-scoped rows. A pessimistic write lock prevents another
@@ -146,12 +146,14 @@ messages, a Kafka outbox, or delivery guarantees to another service.
 
 ## Current boundaries
 
-Authentication and actor attribution are not implemented yet. Standalone reservations
+OIDC authentication and tenant isolation are implemented. All tenant members
+currently share operational permissions; role restrictions and actor attribution
+are still future work. Standalone reservations
 require explicit release; order-owned holds must be released through order cancellation.
 Expiration, partial release, delivery tracking, and returns remain future work.
 Full-order shipments and dispatch are implemented; cancelling prepared shipments
-is coordinated through order cancellation. Keep this application local until authenticated tenant isolation is
-implemented. See the README for runnable API examples and the next milestones.
+is coordinated through order cancellation. The bundled Keycloak start-dev setup is local infrastructure; production identity
+configuration and TLS must be provisioned before deployment. See the README for runnable API examples and the next milestones.
 
 ## Delivery progression and history
 
@@ -192,3 +194,37 @@ checks. It preserves an unchanged command's retry key. After a lost response,
 a refreshed balance could already include that command; the form therefore lets
 the original key reach the backend on replay instead of incorrectly applying new-
 command availability checks. The server still locks and validates new movements.
+
+## Authentication and tenant ownership
+
+The React entry point initializes OIDC before mounting business screens. Login uses
+an authorization code protected by PKCE, with a public client and exact redirect
+origins. Access/refresh tokens live in memory; temporary redirect state uses session
+storage. A page reload returns to sign-in (the provider session can make that quick).
+The API wrapper adds the current access token, and invalid sessions clear the
+mounted console so one account cannot inherit another account's loaded records.
+
+Spring Security validates the signed JWT before a controller runs. Required checks
+include issuer, expiry, audience, nonblank subject, and a canonical UUID `tenant_id`.
+Current tenant resolution fails closed and has no runtime demo fallback. Services
+still take an explicit tenant UUID, making transaction boundaries and repository
+scope visible. Client-supplied tenant selectors never override identity claims.
+
+The bearer API is stateless. CSRF protection is disabled because no ambient cookie
+or HTTP Basic authentication grants API access; JavaScript explicitly attaches the
+bearer header. Revisit that decision if cookie authentication is introduced.
+The local Vite proxy provides same-origin API calls; the API does not open wildcard
+CORS. Only `/actuator/health` is public. Security errors use the same `{error}` shape
+as business errors and never include token contents.
+
+Keycloak's `tenant_id` user attribute is admin-editable only, and public registration
+is disabled. Trusting a correctly signed claim is insufficient if users can change
+its source attribute. The import includes two tenants for a reproducible isolation
+check; Berlin keeps the previous demo UUID, so existing records need no migration.
+Do not add a client tenant picker without first implementing verified membership.
+
+Business tests use an explicit authenticated request fixture. Dedicated security
+integration tests send signed JWTs through the real decoding/filter chain, including
+invalid signatures/claims and cross-tenant access. No test-only security bypass is
+packaged in the application. Existing activity loggers remain commit-aware; user
+names, credentials, and tokens must not appear in operational logs.

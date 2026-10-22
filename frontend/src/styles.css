@@ -1192,3 +1192,154 @@ label small {
     margin-top: 5px;
   }
 }
+
+/* Authentication shares the console palette while keeping the first action clear. */
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 0;
+}
+.auth-story {
+  background: var(--nav);
+  color: white;
+  padding: 46px 10%;
+  display: flex;
+  flex-direction: column;
+}
+.auth-story .brand {
+  margin: 0;
+}
+.auth-story-content {
+  margin: auto 0;
+  padding: 65px 0;
+}
+.auth-story .eyebrow {
+  color: #8cc9b8;
+}
+.auth-story h1 {
+  color: #f5f8f7;
+  margin-top: 22px;
+  font-size: clamp(38px, 4.3vw, 64px);
+  line-height: 1.12;
+  letter-spacing: -2px;
+}
+.auth-story h1 span {
+  color: #8edbc3;
+}
+.auth-story p {
+  color: #b6ccca;
+  line-height: 1.8;
+  max-width: 370px;
+  margin-top: 25px;
+  font-size: 15px;
+}
+.auth-story > small {
+  color: #88aaa7;
+}
+.auth-features {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 40px;
+  color: #d3eae4;
+}
+.auth-features span {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.auth-panel {
+  display: grid;
+  place-items: center;
+  padding: 50px 30px;
+}
+.auth-card {
+  max-width: 380px;
+  width: 100%;
+}
+.auth-lock {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  background: #e3efeb;
+  border: 1px solid #d6e6e0;
+  color: var(--teal);
+  border-radius: 15px;
+  margin-bottom: 35px;
+}
+.auth-card h2 {
+  font-size: 33px;
+  letter-spacing: -1.1px;
+  margin: 16px 0 12px;
+}
+.auth-card > p {
+  color: #738282;
+  line-height: 1.75;
+}
+.auth-card .notice {
+  margin: 24px 0 0;
+  line-height: 1.6;
+}
+.auth-button {
+  margin-top: 30px;
+  width: 100%;
+  min-height: 48px;
+  justify-content: space-between;
+  padding: 12px 18px;
+}
+.auth-retry {
+  width: 100%;
+  margin-top: 12px;
+}
+.auth-card .auth-note {
+  font-size: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 22px;
+  margin-top: 30px;
+}
+.auth-progress {
+  margin-top: 30px;
+}
+.workspace > div {
+  min-width: 0;
+}
+.workspace strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sign-out {
+  font-size: 12px;
+}
+@media (max-width: 750px) {
+  .auth-shell {
+    grid-template-columns: 1fr;
+  }
+  .auth-story {
+    padding: 25px 30px;
+  }
+  .auth-story-content {
+    padding: 35px 0 10px;
+  }
+  .auth-story h1 {
+    font-size: 35px;
+  }
+  .auth-story h1 br {
+    display: none;
+  }
+  .auth-story h1 span {
+    display: block;
+  }
+  .auth-story p,
+  .auth-story > small,
+  .auth-features {
+    display: none;
+  }
+  .auth-panel {
+    padding: 35px 25px 50px;
+  }
+  .auth-lock {
+    margin-bottom: 24px;
+  }
+}

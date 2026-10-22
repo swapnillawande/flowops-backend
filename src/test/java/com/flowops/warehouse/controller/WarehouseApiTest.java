@@ -1,6 +1,8 @@
 package com.flowops.warehouse.controller;
 
 import com.flowops.support.PostgresIntegrationTest;
+import com.flowops.support.AuthenticatedApiTestConfiguration;
+import org.springframework.context.annotation.Import;
 import com.flowops.warehouse.entity.Warehouse;
 import com.flowops.warehouse.repository.WarehouseRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,6 +22,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(AuthenticatedApiTestConfiguration.class)
 class WarehouseApiTest extends PostgresIntegrationTest {
 
     private static final UUID DEMO_TENANT = UUID.fromString("11111111-1111-4111-8111-111111111111");
@@ -34,7 +37,7 @@ class WarehouseApiTest extends PostgresIntegrationTest {
     }
 
     @Test
-    void healthIsPublic() throws Exception {
+    void healthEndpointsRespond() throws Exception {
         mvc.perform(get("/api/v1/health"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("application").value("FlowOps AI"))

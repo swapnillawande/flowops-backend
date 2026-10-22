@@ -12,6 +12,8 @@ import com.flowops.shipment.repository.ShipmentRepository;
 import com.flowops.shipment.repository.ShipmentStatusEventRepository;
 import com.flowops.shipment.service.ShipmentService;
 import com.flowops.support.PostgresIntegrationTest;
+import com.flowops.support.AuthenticatedApiTestConfiguration;
+import org.springframework.context.annotation.Import;
 import com.flowops.tenant.DemoTenant;
 import com.flowops.warehouse.entity.Warehouse;
 import com.flowops.warehouse.repository.WarehouseRepository;
@@ -44,6 +46,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** PostgreSQL integration tests cover the complete order -> hold -> shipment -> stock deduction transaction. */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(AuthenticatedApiTestConfiguration.class)
 class ShipmentApiTest extends PostgresIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired ShipmentRepository shipments;

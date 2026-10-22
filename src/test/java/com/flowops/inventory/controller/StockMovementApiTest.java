@@ -5,6 +5,8 @@ import com.flowops.inventory.repository.StockRepository;
 import com.flowops.product.entity.Product;
 import com.flowops.product.repository.ProductRepository;
 import com.flowops.support.PostgresIntegrationTest;
+import com.flowops.support.AuthenticatedApiTestConfiguration;
+import org.springframework.context.annotation.Import;
 import com.flowops.tenant.DemoTenant;
 import com.flowops.warehouse.entity.Warehouse;
 import com.flowops.warehouse.repository.WarehouseRepository;
@@ -34,6 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(AuthenticatedApiTestConfiguration.class)
 class StockMovementApiTest extends PostgresIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired StockRepository stocks;

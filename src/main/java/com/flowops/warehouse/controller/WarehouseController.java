@@ -1,7 +1,7 @@
 
 package com.flowops.warehouse.controller;
 
-import com.flowops.tenant.DemoTenant;
+import com.flowops.security.CurrentTenant;
 import com.flowops.warehouse.dto.CreateWarehouseRequest;
 import com.flowops.warehouse.dto.WarehouseResponse;
 import com.flowops.warehouse.entity.Warehouse;
@@ -16,14 +16,16 @@ import java.net.URI;
 import java.util.List;
 import java.util.UUID;
 
-/** Warehouse HTTP boundary. The demo tenant comes from the server, never from request data. */
+/** Warehouse HTTP boundary. The tenant comes from a verified identity, never from request data. */
 @RestController
 @RequestMapping("/api/v1/warehouses")
 public class WarehouseController {
+    private final CurrentTenant currentTenant;
 
     private final WarehouseService warehouseService;
 
-    public WarehouseController(WarehouseService warehouseService) {
+    public WarehouseController(WarehouseService warehouseService, CurrentTenant currentTenant) {
+        this.currentTenant = currentTenant;
         this.warehouseService = warehouseService;
     }
 
@@ -31,7 +33,7 @@ public class WarehouseController {
     public ResponseEntity<WarehouseResponse> createWarehouse(@Valid @RequestBody CreateWarehouseRequest request) {
 
         Warehouse saved = warehouseService.createWarehouse(
-                DemoTenant.ID,
+                currentTenant.id(),
                 request.name(),
                 request.city(),
                 request.countryCode()
@@ -49,7 +51,7 @@ public class WarehouseController {
     @GetMapping
     public List<WarehouseResponse> getWarehouses() {
 
-        return warehouseService.getWarehouses(DemoTenant.ID)
+        return warehouseService.getWarehouses(currentTenant.id())
                 .stream()
                 .map(WarehouseResponse::from)
                 .toList();
@@ -60,7 +62,7 @@ public class WarehouseController {
             @PathVariable UUID id) {
 
         Warehouse warehouse = warehouseService
-                .getWarehouseById(DemoTenant.ID, id);
+                .getWarehouseById(currentTenant.id(), id);
 
         return WarehouseResponse.from(warehouse);
     }

@@ -7,6 +7,7 @@ import {
   ChevronRight,
   CircleHelp,
   LayoutDashboard,
+  LogOut,
   Package,
   Plus,
   RefreshCw,
@@ -35,6 +36,8 @@ import {
   StatusForm,
 } from "./forms";
 import type { Order, Page, Product, Shipment, Stock, Warehouse } from "./types";
+
+import type { WorkspaceSession } from "./auth";
 
 import { OrderDetails, MovementHistory } from "./details";
 
@@ -81,7 +84,13 @@ const titles = {
 };
 
 /** Fetch only real API data. Abort superseded reads so an old page cannot overwrite a newer one. */
-export default function App() {
+export default function App({
+  session,
+  onSignOut,
+}: {
+  session?: WorkspaceSession;
+  onSignOut?: () => Promise<void>;
+}) {
   const [tab, setTab] = useState<Tab>("overview"),
     [dialog, setDialog] = useState<Dialog | null>(null);
   const [orders, setOrders] = useState(emptyPage<Order>),
@@ -307,8 +316,8 @@ export default function App() {
         <div className="workspace">
           <span className="workspace-avatar">FO</span>
           <div>
-            <strong>Operations workspace</strong>
-            <small>Local demo</small>
+            <strong>{session?.username || "Operations workspace"}</strong>
+            <small>Your secure workspace</small>
           </div>
         </div>
         <div className="nav-caption">WORKSPACE</div>
@@ -352,7 +361,15 @@ export default function App() {
               year: "numeric",
             })}
           </span>
-          <span className="profile">FO</span>
+          {session && (
+            <button className="sign-out" onClick={() => void onSignOut?.()}>
+              <LogOut size={15} />
+              Sign out
+            </button>
+          )}
+          <span className="profile" aria-label={session?.username}>
+            {session?.username.slice(0, 2).toUpperCase() || "FO"}
+          </span>
         </header>
         <main>
           <div className="page-header">
@@ -563,7 +580,7 @@ export default function App() {
                   ? "Backend unavailable · displayed data may be stale"
                   : "Connected to backend"}
             </span>
-            <span>Local demo · authentication not enabled</span>
+            <span>Secure team workspace</span>
           </footer>
         </main>
       </div>

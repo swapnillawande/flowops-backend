@@ -4,7 +4,8 @@ A logistics platform being built step by step with Java 21 and Spring Boot.
 The current milestone includes PostgreSQL-backed warehouse, product catalog, and
 stock balances, movements, reservations, orders, shipment preparation, and dispatch.
 Manual delivery updates, shipment history, and a React operations console are
-implemented. Kafka, Ollama, authentication, and Kubernetes remain future milestones.
+implemented, with Keycloak sign-in and authenticated tenant isolation. Kafka, Ollama,
+and Kubernetes remain future milestones.
 
 ## React operations console
 
@@ -40,27 +41,72 @@ docker compose -f docker/compose.yaml up -d --wait
 ```
 
 The API runs on port 8080. PostgreSQL is exposed on localhost port 5433.
+Keycloak runs at http://localhost:8082 and imports the local FlowOps realm on its
+first start. Sign in to the React console with either local test account below.
+Restart any older backend process so it loads the new authentication boundary.
 Flyway applies migrations automatically; Hibernate validates the resulting schema.
 Existing migration files must remain unchanged once applied; add a new migration for schema changes.
 
 Optional database settings: `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`.
 Defaults match the local Compose database. The Compose password is for local development.
 
-Stop the database without deleting its data:
+Stop the local services without deleting their data:
 
 ```sh
 docker compose -f docker/compose.yaml stop
 ```
 
+## Sign-in and organization isolation
+
+![FlowOps sign-in screen](docs/images/sign-in.png)
+
+| Local account | Password | Organization |
+| --- | --- | --- |
+| `berlin.operator` | `flowops_local_only` | `11111111-1111-4111-8111-111111111111` (existing demo data) |
+| `hamburg.operator` | `flowops_local_only` | `22222222-2222-4222-8222-222222222222` (separate records) |
+
+These are public, local development credentials. The Compose ports bind to
+loopback. Sign out before switching accounts; Berlin's records should disappear
+when signed in as Hamburg. No business records are seeded by the realm import.
+The local Keycloak administrator is `local-admin` / `local_admin_only`.
+
+Browser QA on a separate database confirmed an authenticated Berlin warehouse
+write, successful logout, and an empty warehouse list after signing in as Hamburg.
+[Berlin workspace](docs/images/authenticated-workspace.png) ·
+[Hamburg workspace](docs/images/tenant-isolation.png).
+
+React uses authorization code with PKCE. The backend checks the signature, issuer,
+expiry, API audience (`flowops-api`), subject, and UUID tenant claim. Only identity
+administrators can assign `tenant_id`; end users cannot edit it in their profile.
+`GET /api/v1/session` returns the verified subject, username, and tenant ID for the
+signed-in console. `/actuator/health` remains public; `/api/v1/health` requires login.
+
+To use the curl examples, set `ACCESS_TOKEN` to the short-lived access token from
+your own signed-in browser request (Network tab, Authorization header, omit the
+`Bearer ` prefix), or obtain one with an OAuth client using authorization code +
+PKCE. Keep tokens out of source control, shared logs, and screenshots. Password
+grants are disabled. Requests without a token intentionally return `401`.
+
+Configuration: backend `OIDC_ISSUER_URI` and `OIDC_AUDIENCE`; optionally
+`OIDC_JWK_SET_URI` for a separately reachable signing-key endpoint (issuer checks
+still apply). Frontend `VITE_OIDC_AUTHORITY` and `VITE_OIDC_CLIENT_ID` are public
+build-time settings. Defaults match Compose. See the
+[identity setup guide](docker/keycloak/README.md) for claim ownership and local reset.
+
+This milestone gives every authenticated tenant member the same operational
+permissions. Role restrictions, per-action actor audit fields, and production
+identity deployment are upcoming work. Existing JWTs remain valid until their
+short expiry even after provider logout; there is no token revocation lookup.
+
 ## Try the warehouse API
 
 ```sh
-curl -i http://localhost:8080/api/v1/health
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" http://localhost:8080/api/v1/health
 curl -i http://localhost:8080/actuator/health
-curl -i -X POST http://localhost:8080/api/v1/warehouses \
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" -X POST http://localhost:8080/api/v1/warehouses \
   -H 'Content-Type: application/json' \
   -d '{"name":"Berlin Central","city":"Berlin","countryCode":"de"}'
-curl -i http://localhost:8080/api/v1/warehouses
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" http://localhost:8080/api/v1/warehouses
 ```
 
 Creation returns `201 Created` and a `Location` header. Follow that URL to fetch
@@ -73,14 +119,13 @@ Errors have the shape `{"error":"description"}`.
 | GET | `/api/v1/health` | Application identification |
 | GET | `/actuator/health` | Application and database health |
 | POST | `/api/v1/warehouses` | Create a warehouse |
-| GET | `/api/v1/warehouses` | List demo tenant warehouses |
-| GET | `/api/v1/warehouses/{id}` | Fetch a warehouse for the demo tenant |
+| GET | `/api/v1/warehouses` | List signed-in tenant warehouses |
+| GET | `/api/v1/warehouses/{id}` | Fetch a warehouse for the signed-in tenant |
 
-**Local demo only:** authentication is not implemented. Warehouse endpoints use
-a fixed server-side tenant ID (`11111111-1111-4111-8111-111111111111`). Clients
-cannot choose the tenant. Tenant-scoped queries are tested, but this is not an
-authenticated multi-tenant deployment. Add OIDC and derive the tenant from verified
-identity claims before exposing business APIs publicly.
+All business endpoints require a valid bearer access token. The API derives the
+organization from the verified `tenant_id` claim; headers, query parameters, and
+request bodies cannot select a different tenant. Missing/invalid credentials return
+`401`, and another tenant's record IDs return `404` through scoped service queries.
 
 ## Try the product catalog
 
@@ -88,17 +133,17 @@ A product identifies what can be stored or shipped. Its SKU is unique within a
 tenant and normalized to uppercase. Warehouse stock quantities are tracked separately from the product catalog.
 
 ```sh
-curl -i -X POST http://localhost:8080/api/v1/products \
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" -X POST http://localhost:8080/api/v1/products \
   -H 'Content-Type: application/json' \
   -d '{"sku":"laptop-001","name":"Business laptop","weightKg":1.250}'
-curl -i http://localhost:8080/api/v1/products
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" http://localhost:8080/api/v1/products
 ```
 
 | Method | Endpoint | Behavior |
 | --- | --- | --- |
 | POST | `/api/v1/products` | Create a product; returns `201` and its `Location` |
-| GET | `/api/v1/products` | List demo tenant products ordered by SKU |
-| GET | `/api/v1/products/{id}` | Retrieve a demo tenant product |
+| GET | `/api/v1/products` | List signed-in tenant products ordered by SKU |
+| GET | `/api/v1/products/{id}` | Retrieve a signed-in tenant product |
 
 Follow the creation response's `Location` to retrieve the product. SKU supports
 1–64 ASCII letters, digits, dots, underscores, or hyphens, starting with a letter
@@ -108,8 +153,7 @@ positive, and supports at most six integer and three decimal digits (0.001 to
 999999.999). Decimal storage avoids binary floating point rounding in weights.
 
 Duplicate SKU returns `409`, invalid input `400`, and unknown or another tenant's
-product `404`. Products share the warehouse API's fixed demo tenant and currently
-have no authentication. The list is unpaginated for this initial demo; pagination
+product `404`. Products use the same verified tenant as warehouses. The list is unpaginated for this initial demo; pagination
 is needed before supporting large catalogs.
 
 ## Initialize warehouse stock
@@ -120,11 +164,11 @@ IDs into these variables:
 ```sh
 WAREHOUSE_ID='<warehouse UUID from the response>'
 PRODUCT_ID='<product UUID from the response>'
-curl -i -X POST "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/stock" \
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" -X POST "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/stock" \
   -H 'Content-Type: application/json' \
   -d "{\"productId\":\"$PRODUCT_ID\",\"initialQuantity\":25}"
-curl -i "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/stock"
-curl -i "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/stock/$PRODUCT_ID"
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/stock"
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/stock/$PRODUCT_ID"
 ```
 
 | Method | Endpoint | Behavior |
@@ -141,7 +185,7 @@ to serialize concurrent changes.
 
 Opening stock can be created only once per tenant/warehouse/product. A repeated or
 simultaneous duplicate request returns `409` and never resets the quantity. The
-warehouse and product must both belong to the current demo tenant; missing or
+warehouse and product must both belong to the current signed-in tenant; missing or
 inaccessible references return `404`. An existing warehouse without stock returns
 an empty list; looking up an uninitialized product's stock returns `404`.
 
@@ -154,7 +198,7 @@ workflow if deletion is introduced. Lists remain unpaginated for the local demo.
 Opening stock also creates an `OPENING` audit entry. Migration V5 backfills an
 opening entry from each existing stock balance, preserving its original creation
 time. Historical changes made outside FlowOps before that migration cannot be
-reconstructed. Business APIs continue to use the fixed demo tenant without authentication.
+reconstructed. Business APIs use the tenant from the verified access token.
 
 ## Record receipts and adjustments
 
@@ -165,10 +209,10 @@ of 25 to 32.
 
 ```sh
 REQUEST_ID=$(uuidgen)
-curl -i -X POST "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/stock/$PRODUCT_ID/movements" \
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" -X POST "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/stock/$PRODUCT_ID/movements" \
   -H 'Content-Type: application/json' \
   -d "{\"requestId\":\"$REQUEST_ID\",\"type\":\"RECEIPT\",\"quantity\":10,\"reason\":\"Delivery received\"}"
-curl -i "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/stock/$PRODUCT_ID/movements"
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/stock/$PRODUCT_ID/movements"
 ```
 
 | Method | Endpoint | Behavior |
@@ -195,8 +239,7 @@ integer capacity return `409` without writing a movement. Invalid payloads retur
 Balance changes and movement insertion commit in one database transaction. Row
 locking prevents lost updates and serializes duplicate checks. The database also
 enforces request uniqueness and valid movement arithmetic. Audit history has no
-update/delete API; database administrators can still modify it. Actor identity will
-be added with authentication. History is unpaginated for this local demo.
+update/delete API; database administrators can still modify it. Per-operation actor attribution remains a separate future migration. History is unpaginated for this local demo.
 
 ## Reserve and release inventory
 
@@ -206,7 +249,7 @@ every line or changes nothing.
 
 ```sh
 RESERVATION_REQUEST_ID=$(uuidgen)
-curl -i -X POST "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/reservations" \
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" -X POST "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/reservations" \
   -H 'Content-Type: application/json' \
   -d "{\"requestId\":\"$RESERVATION_REQUEST_ID\",\"items\":[{\"productId\":\"$PRODUCT_ID\",\"quantity\":2}]}"
 ```
@@ -215,8 +258,8 @@ Copy the reservation ID from the response, then retrieve or release it:
 
 ```sh
 RESERVATION_ID='<reservation UUID from the response>'
-curl -i "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/reservations/$RESERVATION_ID"
-curl -i -X POST "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/reservations/$RESERVATION_ID/release"
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/reservations/$RESERVATION_ID"
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" -X POST "http://localhost:8080/api/v1/warehouses/$WAREHOUSE_ID/reservations/$RESERVATION_ID/release"
 ```
 
 | Method | Endpoint | Behavior |
@@ -254,13 +297,13 @@ order, reservation, or partial hold. Orders manage fulfillment quantities, not p
 
 ```sh
 ORDER_REQUEST_ID=$(uuidgen)
-curl -i -X POST http://localhost:8080/api/v1/orders \
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" -X POST http://localhost:8080/api/v1/orders \
   -H 'Content-Type: application/json' \
   -d "{\"requestId\":\"$ORDER_REQUEST_ID\",\"warehouseId\":\"$WAREHOUSE_ID\",\"customerReference\":\"DEMO-CUSTOMER-42\",\"items\":[{\"productId\":\"$PRODUCT_ID\",\"quantity\":2}]}"
 ORDER_ID='<order UUID from the response>'
-curl -i "http://localhost:8080/api/v1/orders/$ORDER_ID"
-curl -i 'http://localhost:8080/api/v1/orders?page=0&size=20'
-curl -i -X POST "http://localhost:8080/api/v1/orders/$ORDER_ID/cancel"
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:8080/api/v1/orders/$ORDER_ID"
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" 'http://localhost:8080/api/v1/orders?page=0&size=20'
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" -X POST "http://localhost:8080/api/v1/orders/$ORDER_ID/cancel"
 ```
 
 | Method | Endpoint | Behavior |
@@ -272,7 +315,7 @@ curl -i -X POST "http://localhost:8080/api/v1/orders/$ORDER_ID/cancel"
 
 Input requires a request UUID, warehouse UUID, trimmed customer reference of 1–100
 characters, and 1–50 distinct product UUIDs with positive integer quantities.
-The warehouse, products, and stock must be accessible within the fixed demo tenant.
+The warehouse, products, and stock must be accessible within the signed-in tenant.
 A customer reference is a correlation label, not a verified customer identity.
 
 The request ID is unique per tenant. An identical retry (including reordered items)
@@ -306,13 +349,13 @@ create a fresh order with a new request ID first. This milestone ships every ite
 in the order together; partial/split shipments are not supported.
 
 ```sh
-curl -i -X POST http://localhost:8080/api/v1/shipments \
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" -X POST http://localhost:8080/api/v1/shipments \
   -H 'Content-Type: application/json' \
   -d "{\"orderId\":\"$ORDER_ID\",\"carrier\":\"Demo carrier\"}"
 SHIPMENT_ID='<shipment UUID from the response>'
-curl -i "http://localhost:8080/api/v1/shipments/$SHIPMENT_ID"
-curl -i 'http://localhost:8080/api/v1/shipments?page=0&size=20'
-curl -i -X POST "http://localhost:8080/api/v1/shipments/$SHIPMENT_ID/dispatch"
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" "http://localhost:8080/api/v1/shipments/$SHIPMENT_ID"
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" 'http://localhost:8080/api/v1/shipments?page=0&size=20'
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" -X POST "http://localhost:8080/api/v1/shipments/$SHIPMENT_ID/dispatch"
 ```
 
 | Method | Endpoint | Behavior |
@@ -413,6 +456,8 @@ tenant-scoped pagination, catalog snapshots, and preventing direct release of
 order-owned reservations. Shipment tests cover dispatch accounting, audit and
 state rollback, retry-key isolation, cancellation/dispatch races, concurrent
 dispatch, tenant scope, and upgrading confirmed orders with active holds from V7.
+Security tests additionally verify signed tokens, invalid credentials/claims, and
+cross-tenant reads and writes; the business suite uses explicit authenticated fixtures.
 
 ## Structure
 
@@ -420,24 +465,23 @@ dispatch, tenant scope, and upgrading confirmed orders with active holds from V7
 - `order`: order lifecycle, product snapshots, pagination, inventory integration, and commit-aware logs
 - `inventory`: balances, movements, reservations, lifecycle handling, and commit-aware activity logging
 - `product`: product catalog controller, DTOs, service, entity, repository, and exceptions
-- `tenant`: shared server-side demo tenant until authentication is implemented
+- `security`: bearer-token validation, HTTP access rules, and session identity
+- `security/CurrentTenant`: trusted tenant resolution at controller boundaries
 - `warehouse/controller`: HTTP requests and responses
 - `warehouse/dto`: validated input and public response fields
 - `warehouse/service`: business operations and transaction boundaries
 - `warehouse/entity` and `warehouse/repository`: PostgreSQL persistence
 - `exception`: shared HTTP error handling
 - `src/main/resources/db/migration`: versioned schema changes
-- `docker`: local database infrastructure
+- `docker`: local PostgreSQL and Keycloak infrastructure
 
 ## Next milestones
 
-1. Add authenticated tenant isolation before public deployment, followed by reservation expiry coordinated with orders.
-2. Add orders and shipments to complete one fulfillment workflow.
-3. Add OIDC authentication and authenticated tenant isolation.
-4. Build a React and TypeScript interface for that workflow.
-5. Add Kafka with transactional outbox publishing and idempotent consumers.
-6. Integrate local Ollama for shipment explanations; keep inventory decisions deterministic.
-7. Add container packaging, Kubernetes manifests, CI, and observability.
+1. Add operator/viewer permissions and actor attribution to audit history.
+2. Add reservation expiry coordinated with order cancellation.
+3. Add Kafka with transactional outbox publishing and idempotent consumers.
+4. Integrate local Ollama for shipment explanations; keep inventory decisions deterministic.
+5. Add container packaging, Kubernetes manifests, CI, and observability.
 
 Keep each milestone runnable and tested before moving to the next. Performance
 and reliability claims belong in the portfolio only after measurement.

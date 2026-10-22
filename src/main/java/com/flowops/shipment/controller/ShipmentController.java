@@ -6,7 +6,7 @@ import com.flowops.shipment.dto.ShipmentStatusEventResponse;
 import java.util.List;
 import com.flowops.shipment.dto.ShipmentResponse;
 import com.flowops.shipment.service.ShipmentService;
-import com.flowops.tenant.DemoTenant;
+import com.flowops.security.CurrentTenant;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -17,38 +17,42 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/shipments")
 public class ShipmentController {
+    private final CurrentTenant currentTenant;
     private final ShipmentService service;
-    public ShipmentController(ShipmentService service) { this.service = service; }
+    public ShipmentController(ShipmentService service, CurrentTenant currentTenant) {
+        this.currentTenant = currentTenant;
+        this.service = service;
+    }
 
     @PostMapping
     public ResponseEntity<ShipmentResponse> create(@Valid @RequestBody CreateShipmentRequest request) {
-        var result = service.create(DemoTenant.ID, request);
+        var result = service.create(currentTenant.id(), request);
         return result.created()
                 ? ResponseEntity.created(URI.create("/api/v1/shipments/" + result.response().id())).body(result.response())
                 : ResponseEntity.ok(result.response());
     }
 
     @GetMapping("/{shipmentId}")
-    public ShipmentResponse get(@PathVariable UUID shipmentId) { return service.get(DemoTenant.ID, shipmentId); }
+    public ShipmentResponse get(@PathVariable UUID shipmentId) { return service.get(currentTenant.id(), shipmentId); }
 
     @GetMapping
     public ShipmentService.ShipmentPage list(@RequestParam(defaultValue = "0") int page,
                                             @RequestParam(defaultValue = "20") int size) {
-        return service.list(DemoTenant.ID, page, size);
+        return service.list(currentTenant.id(), page, size);
     }
 
     @GetMapping("/{shipmentId}/history")
     public List<ShipmentStatusEventResponse> history(@PathVariable UUID shipmentId) {
-        return service.history(DemoTenant.ID, shipmentId);
+        return service.history(currentTenant.id(), shipmentId);
     }
 
     /** Operators record transit/delivery updates; this is not an external carrier webhook. */
     @PostMapping("/{shipmentId}/status")
     public ShipmentStatusEventResponse update(@PathVariable UUID shipmentId, @Valid @RequestBody UpdateShipmentStatusRequest request) {
-        return service.updateStatus(DemoTenant.ID, shipmentId, request);
+        return service.updateStatus(currentTenant.id(), shipmentId, request);
     }
 
     /** Retrying a dispatch returns the existing result without deducting stock again. */
     @PostMapping("/{shipmentId}/dispatch")
-    public ShipmentResponse dispatch(@PathVariable UUID shipmentId) { return service.dispatch(DemoTenant.ID, shipmentId); }
+    public ShipmentResponse dispatch(@PathVariable UUID shipmentId) { return service.dispatch(currentTenant.id(), shipmentId); }
 }

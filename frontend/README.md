@@ -6,7 +6,7 @@ mode or external carrier integration.
 
 ## Start
 
-Use Node.js 22.12 or newer. From the repository root, start PostgreSQL and **restart
+Use Node.js 22.12 or newer. From the repository root, start PostgreSQL/Keycloak and **restart
 Spring Boot on the current source** so the latest migrations and delivery APIs load:
 
 ```sh
@@ -37,7 +37,28 @@ API_TARGET=http://127.0.0.1:8081 npm run dev
 The browser stays same-origin, so broad CORS permissions are unnecessary. This
 proxy is a development/preview convenience, not production hosting. A production
 server must serve the static build and reverse-proxy `/api` to Spring Boot.
-Authentication is not implemented; keep both services local.
+The bundled identity provider is for local development. Production hosting needs
+TLS and matching identity-provider redirect origins; see the root README.
+
+## Sign in
+
+Choose **Sign in** and use `berlin.operator` / `flowops_local_only`. This account
+sees the existing demo organization. `hamburg.operator` with the same local password
+belongs to a different organization and starts without records. Use **Sign out**
+before switching. These seeded accounts are local test credentials only.
+
+The default provider is `http://localhost:8082/realms/flowops` with client
+`flowops-console`. Override using `VITE_OIDC_AUTHORITY` and `VITE_OIDC_CLIENT_ID`
+before starting/building Vite. Redirects are the browser origin plus `/`; the bundled
+realm permits only port 5173 on localhost and 127.0.0.1. `API_TARGET` changes only
+the backend proxy, not the identity provider.
+
+Tokens stay in memory. Reloading the page returns to sign-in, and the existing
+provider session can complete it without re-entering credentials. Logout/expiry
+removes the console and its loaded records. Temporary PKCE redirect state uses
+session storage; no access or refresh token is persisted there or in local storage.
+After a session expires during a write, check the latest server state before
+starting a new command: the original operation may already have committed.
 
 ## First workflow
 
@@ -72,7 +93,9 @@ checking before bundling. `npm run preview` serves the build for local inspectio
 ## Code map
 
 - `types.ts`: typed public API contracts.
-- `api.ts`: fetch, JSON parsing, and actionable server/network errors.
+- `auth.ts` / `AuthGate.tsx`: OIDC redirects, verified session, login screen, and workspace lifecycle.
+- `apiSession.ts`: in-memory bearer token and account-wide request cancellation.
+- `api.ts`: authenticated fetch, JSON parsing, and actionable server/network errors.
 - `App.tsx`: navigation, paginated resources, tables, and action orchestration.
 - `forms.tsx`: catalog, stock, order, shipment, delivery, and physical movement forms.
 - `details.tsx`: canonical order snapshots and stock movement ledger dialogs.
@@ -89,7 +112,7 @@ there is no live push channel yet.
 
 The overview shows server-reported order/shipment totals. Tables and activity show
 the current page; no delivery-rate or other aggregate metrics are invented. Catalog
-lists are currently unpaginated, matching the backend's local-demo API. Full catalog editing, authentication, and automatic/live tracking are later milestones.
+lists are currently unpaginated, matching the backend's local-demo API. Full catalog editing, role-based permissions, and automatic/live tracking are later milestones.
 
 ## Inventory changes and detail views
 

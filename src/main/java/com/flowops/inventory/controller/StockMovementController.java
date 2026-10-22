@@ -3,7 +3,7 @@ package com.flowops.inventory.controller;
 import com.flowops.inventory.dto.CreateStockMovementRequest;
 import com.flowops.inventory.dto.StockMovementResponse;
 import com.flowops.inventory.service.StockMovementService;
-import com.flowops.tenant.DemoTenant;
+import com.flowops.security.CurrentTenant;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,9 +20,11 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/warehouses/{warehouseId}/stock/{productId}/movements")
 public class StockMovementController {
+    private final CurrentTenant currentTenant;
     private final StockMovementService service;
 
-    public StockMovementController(StockMovementService service) {
+    public StockMovementController(StockMovementService service, CurrentTenant currentTenant) {
+        this.currentTenant = currentTenant;
         this.service = service;
     }
 
@@ -30,13 +32,13 @@ public class StockMovementController {
     public ResponseEntity<StockMovementResponse> create(@PathVariable UUID warehouseId,
                                                        @PathVariable UUID productId,
                                                        @Valid @RequestBody CreateStockMovementRequest request) {
-        var result = service.createMovement(DemoTenant.ID, warehouseId, productId, request);
+        var result = service.createMovement(currentTenant.id(), warehouseId, productId, request);
         return ResponseEntity.status(result.created() ? 201 : 200).body(StockMovementResponse.from(result.movement()));
     }
 
     @GetMapping
     public List<StockMovementResponse> list(@PathVariable UUID warehouseId, @PathVariable UUID productId) {
-        return service.getMovements(DemoTenant.ID, warehouseId, productId).stream()
+        return service.getMovements(currentTenant.id(), warehouseId, productId).stream()
                 .map(StockMovementResponse::from).toList();
     }
 }

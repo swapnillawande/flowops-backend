@@ -8,6 +8,8 @@ import com.flowops.order.service.OrderService;
 import com.flowops.product.entity.Product;
 import com.flowops.product.repository.ProductRepository;
 import com.flowops.support.PostgresIntegrationTest;
+import com.flowops.support.AuthenticatedApiTestConfiguration;
+import org.springframework.context.annotation.Import;
 import com.flowops.tenant.DemoTenant;
 import com.flowops.warehouse.entity.Warehouse;
 import com.flowops.warehouse.repository.WarehouseRepository;
@@ -39,6 +41,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** End-to-end transaction tests, including rollback across the order and inventory module boundary. */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(AuthenticatedApiTestConfiguration.class)
 class OrderApiTest extends PostgresIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired OrderRepository orders;
