@@ -1343,3 +1343,16 @@ label small {
     margin-bottom: 24px;
   }
 }
+
+.audit-actor {
+  display: block;
+  color: var(--muted);
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+.audit-actor span {
+  font-family: ui-monospace, monospace;
+}
+.inventory-readonly {
+  padding: 0 24px 24px;
+}

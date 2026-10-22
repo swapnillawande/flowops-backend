@@ -63,6 +63,7 @@ docker compose -f docker/compose.yaml stop
 | Local account | Password | Organization |
 | --- | --- | --- |
 | `berlin.operator` | `flowops_local_only` | `11111111-1111-4111-8111-111111111111` (existing demo data) |
+| `berlin.viewer` | `flowops_local_only` | `11111111-1111-4111-8111-111111111111` (read-only) |
 | `hamburg.operator` | `flowops_local_only` | `22222222-2222-4222-8222-222222222222` (separate records) |
 
 These are public, local development credentials. The Compose ports bind to
@@ -93,9 +94,24 @@ still apply). Frontend `VITE_OIDC_AUTHORITY` and `VITE_OIDC_CLIENT_ID` are publi
 build-time settings. Defaults match Compose. See the
 [identity setup guide](docker/keycloak/README.md) for claim ownership and local reset.
 
-This milestone gives every authenticated tenant member the same operational
-permissions. Role restrictions, per-action actor audit fields, and production
-identity deployment are upcoming work. Existing JWTs remain valid until their
+Roles come only from the verified `flowops_roles` array. `flowops-viewer` may read
+records and history; `flowops-operator` may also run commands. Missing, malformed,
+or unrelated roles grant no business access (`403`). The session endpoint stays
+available to a verified identity so the console can explain missing permissions.
+The UI hides write controls for viewers; the API independently rejects every write.
+Use the identity guide to update an existing Keycloak realm: startup import skips
+realms that already exist, so existing accounts need role assignments and the mapper.
+
+Stock movements and shipment history now include `actorSubject`, `actorIssuer`,
+and an optional `actorName` snapshot, captured from the verified identity inside the transaction. This includes opening
+stock, receipts, adjustments, dispatch, preparation, cancellation, transit, and
+delivery. Replays keep the original actor. V10 preserves old records with null
+actors; the UI displays **Not recorded**. Non-user service work also remains null
+until a system-identity policy is defined. Subject plus issuer identify the OIDC
+user; the stored name is an informative label captured at that time and never
+grants access. Other business records do not yet have an actor ledger.
+Production identity deployment is still a separate milestone. Existing JWTs remain
+valid until their
 short expiry even after provider logout; there is no token revocation lookup.
 
 ## Try the warehouse API
@@ -239,7 +255,7 @@ integer capacity return `409` without writing a movement. Invalid payloads retur
 Balance changes and movement insertion commit in one database transaction. Row
 locking prevents lost updates and serializes duplicate checks. The database also
 enforces request uniqueness and valid movement arithmetic. Audit history has no
-update/delete API; database administrators can still modify it. Per-operation actor attribution remains a separate future migration. History is unpaginated for this local demo.
+update/delete API; database administrators can still modify it. New movement entries record the verified subject and issuer; historical entries may have no actor. History is unpaginated for this local demo.
 
 ## Reserve and release inventory
 
@@ -283,7 +299,7 @@ same retry key are also protected by a database unique constraint.
 Standalone reservations require explicit full release and do not expire automatically.
 Order-created reservations expose an `ownerOrderId`; release these through order
 cancellation. Direct release or standalone retry of an order-owned reservation
-returns `409`. Partial release and actor attribution remain future work. Dispatch consumes an
+returns `409`. Partial release and reservation actor history remain future work. Dispatch consumes an
 order-owned hold; consumed units cannot be released. Reservation creation/release emit operational logs
 after commit; DEBUG logging adds replay/lookup details. See the
 [development guide](docs/DEVELOPMENT_GUIDE.md) for a code walkthrough, comments,
@@ -467,6 +483,7 @@ cross-tenant reads and writes; the business suite uses explicit authenticated fi
 - `product`: product catalog controller, DTOs, service, entity, repository, and exceptions
 - `security`: bearer-token validation, HTTP access rules, and session identity
 - `security/CurrentTenant`: trusted tenant resolution at controller boundaries
+- `audit`: insertion-time actor attribution for immutable audit history
 - `warehouse/controller`: HTTP requests and responses
 - `warehouse/dto`: validated input and public response fields
 - `warehouse/service`: business operations and transaction boundaries
@@ -477,11 +494,25 @@ cross-tenant reads and writes; the business suite uses explicit authenticated fi
 
 ## Next milestones
 
-1. Add operator/viewer permissions and actor attribution to audit history.
-2. Add reservation expiry coordinated with order cancellation.
+1. Add reservation expiry coordinated with order cancellation.
+2. Extend actor auditing to order and reservation lifecycles.
 3. Add Kafka with transactional outbox publishing and idempotent consumers.
 4. Integrate local Ollama for shipment explanations; keep inventory decisions deterministic.
 5. Add container packaging, Kubernetes manifests, CI, and observability.
 
 Keep each milestone runnable and tested before moving to the next. Performance
 and reliability claims belong in the portfolio only after measurement.
+
+## Permissions and audit verification
+
+The security suite uses signed operator/viewer tokens, tests every mutation route
+as a viewer, and checks that missing/unrelated roles cannot grant access. It also
+checks spoofed actor fields, replay by another operator, dispatch/delivery/cancel
+attribution, and a V9-to-V10 upgrade preserving unknown historical actors.
+Frontend tests cover read-only controls, accessible detail/history actions, missing
+role recovery, and escaping actor IDs as plain text.
+
+Browser QA also verified an operator-created opening balance and the same ledger
+viewed by `berlin.viewer`, with write controls hidden:
+
+![Viewer reading operator-attributed stock history](docs/images/viewer-audit-history.png)

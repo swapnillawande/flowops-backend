@@ -176,3 +176,43 @@ describe("Order and inventory details", () => {
     ).toBeDisabled();
   });
 });
+
+it("shows immutable actor identifiers as text and does not invent historical actors", async () => {
+  vi.mocked(api).mockResolvedValue([
+    {
+      id: "old",
+      type: "OPENING",
+      quantity: 10,
+      onHandBefore: 0,
+      onHandAfter: 10,
+      reason: "Migrated opening",
+      createdAt: "2026-10-21T10:00:00Z",
+      actorSubject: null,
+      actorIssuer: null,
+    },
+    {
+      id: "new",
+      type: "RECEIPT",
+      quantity: 2,
+      onHandBefore: 10,
+      onHandAfter: 12,
+      reason: "Delivery",
+      createdAt: "2026-10-22T10:00:00Z",
+      actorSubject: "<script>operator</script>",
+      actorIssuer: "https://identity.example",
+    },
+  ]);
+  const { container } = render(
+    <MovementHistory warehouseId="warehouse" productId="product" />,
+  );
+  expect(
+    await screen.findByText("<script>operator</script>"),
+  ).toBeInTheDocument();
+  expect(screen.getByText("Recorded by: Not recorded")).toBeInTheDocument();
+  expect(
+    screen.getByTitle(
+      "Identity provider: https://identity.example; Subject: <script>operator</script>",
+    ),
+  ).toBeInTheDocument();
+  expect(container.querySelector("script")).toBeNull();
+});

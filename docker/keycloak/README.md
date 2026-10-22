@@ -18,6 +18,7 @@ local Keycloak data volume after stopping its service. Do not delete the separat
 
 - `berlin.operator` / `flowops_local_only`: tenant
   `11111111-1111-4111-8111-111111111111`, preserving access to earlier demo records.
+- `berlin.viewer` / `flowops_local_only`: same tenant as Berlin, read-only access.
 - `hamburg.operator` / `flowops_local_only`: tenant
   `22222222-2222-4222-8222-222222222222`, a separate organization.
 - Administration: `http://localhost:8082/admin`, `local-admin` / `local_admin_only`.
@@ -66,10 +67,39 @@ configured issuer check. No permissive development authentication mode exists.
 Production needs a production Keycloak database, TLS, managed secrets, exact
 production redirects/origins, a deliberate user-provisioning process, and a tenant
 membership/permission policy. The bundled `start-dev` configuration binds only to
-loopback and is not that deployment. All tenant members currently have operational
-access; viewer/operator roles and audit actor fields are the next increment.
+loopback and is not that deployment. Access requires an assigned `flowops-viewer` or `flowops-operator` realm role.
+Role removal takes effect on newly issued tokens; existing tokens last until expiry.
 
 Implementation references: [Keycloak container configuration](https://www.keycloak.org/server/containers),
 [Keycloak user-profile permissions](https://www.keycloak.org/docs/latest/server_admin/#_user-profile),
 [Spring Security JWT resource server](https://docs.spring.io/spring-security/reference/servlet/oauth2/resource-server/jwt.html),
 and [oidc-client-ts](https://authts.github.io/oidc-client-ts/).
+
+## Application permissions and existing realms
+
+The dedicated mapper writes allowed realm roles into the access-token-only
+`flowops_roles` array. `fullScopeAllowed` stays false; the console's explicit role
+scope mappings include only `flowops-viewer` and `flowops-operator`. The API ignores
+other realm roles, OAuth scopes, and caller-provided permission fields. Operators
+can read and write; viewers can only read. The viewer account shares Berlin's data.
+
+For a realm created before this milestone, startup import does not update it. Keep
+its business data and users, then apply these changes through the local admin console:
+
+1. In realm **flowops**, create realm roles `flowops-viewer` and `flowops-operator`.
+2. Under **Clients → flowops-console → Client scopes → flowops-console-dedicated → Scope**,
+   assign both realm roles to the client's permitted role scope mappings. Keep
+   **Full scope allowed** off.
+3. Under that dedicated scope's **Mappers**, add **User Realm Role**. Name it
+   `flowops-application-roles`; token claim name `flowops_roles`; JSON type `String`;
+   **Multivalued** on; **Add to access token** on; ID token and userinfo off.
+   Leave the realm role prefix empty.
+4. Under each operator user's **Role mapping**, assign `flowops-operator`.
+5. For a read-only user, assign `flowops-viewer` and set its admin-only `tenant_id`
+   to the intended organization. The bundled `berlin.viewer` fixture has Berlin's
+   tenant UUID and the same local password as the other fixtures.
+6. Sign out and back in to obtain a token with the new roles. The API deliberately
+   denies old tokens without application roles rather than granting a fallback.
+
+For a disposable identity database, recreating only Keycloak's volume imports the
+complete updated fixture instead. Never remove the business PostgreSQL volume.

@@ -1,4 +1,4 @@
-import { Badge, date, Empty, label } from "./components";
+import { ActorIdentity, Badge, date, Empty, label } from "./components";
 import { useResource } from "./useResource";
 import type { OrderDetail, StockMovement, Warehouse } from "./types";
 
@@ -171,6 +171,7 @@ export function MovementHistory({
               </span>
             </div>
             <p>{movement.reason}</p>
+            <ActorIdentity actor={movement} />
             <div className="movement-meta">
               <span>
                 {movement.onHandBefore} → {movement.onHandAfter} on hand

@@ -15,6 +15,8 @@ import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.PlainJWT;
 import com.nimbusds.jwt.SignedJWT;
 import com.sun.net.httpserver.HttpServer;
+import org.flywaydb.core.Flyway;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -83,6 +85,7 @@ class SecurityApiTest extends PostgresIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
     @Autowired JdbcTemplate jdbc;
+    @Autowired DataSource dataSource;
     @Autowired WarehouseRepository warehouses;
     @Autowired ProductRepository products;
     @Autowired StockRepository stocks;
@@ -255,6 +258,150 @@ class SecurityApiTest extends PostgresIntegrationTest {
         assertEquals(TENANT_B, products.findById(UUID.fromString(foreignProduct)).orElseThrow().getTenantId());
     }
 
+    @Test
+    void viewerCanReadAllHistoryButCannotRunAnyMutation() throws Exception {
+        String operator = token(TENANT_A);
+        var flow = flow(operator);
+        String viewer = token(TENANT_A, claims -> claims.claim("flowops_roles", List.of("flowops-viewer")));
+        request(get("/api/v1/session"), viewer).andExpect(jsonPath("roles[0]").value("viewer"));
+        for (String path : List.of("/api/v1/health", "/api/v1/warehouses", "/api/v1/products",
+                flow.stockPath(), flow.stockPath() + "/movements", "/api/v1/orders", flow.orderPath(),
+                "/api/v1/shipments", flow.shipmentPath(), flow.shipmentPath() + "/history")) {
+            request(get(path), viewer).andExpect(status().isOk());
+        }
+        // Authorization must precede validation and resource lookup, even for forged/manual requests.
+        for (String path : List.of("/api/v1/warehouses", "/api/v1/products", "/api/v1/orders",
+                "/api/v1/shipments", "/api/v1/warehouses/" + flow.warehouse() + "/stock",
+                flow.stockPath() + "/movements", flow.orderPath() + "/cancel",
+                flow.shipmentPath() + "/dispatch", flow.shipmentPath() + "/status",
+                "/api/v1/warehouses/" + flow.warehouse() + "/reservations",
+                "/api/v1/warehouses/" + flow.warehouse() + "/reservations/" + flow.reservation() + "/release")) {
+            request(postJson(path, "{}"), viewer).andExpect(status().isForbidden())
+                    .andExpect(jsonPath("error").value("Access denied"));
+        }
+        for (var command : List.of(put(flow.stockPath()), patch(flow.orderPath()), delete(flow.shipmentPath()))) {
+            request(command, viewer).andExpect(status().isForbidden());
+        }
+        request(get(flow.stockPath()), operator).andExpect(jsonPath("onHand").value(10))
+                .andExpect(jsonPath("reserved").value(2));
+        request(get(flow.shipmentPath()), operator).andExpect(jsonPath("status").value("PREPARED"));
+    }
+
+    @Test
+    void missingMalformedAndUnrelatedRolesNeverGrantBusinessAccess() throws Exception {
+        for (Object roles : List.of("flowops-operator", 123, List.of("admin", "operator", "ROLE_OPERATOR"), List.of())) {
+            String bearer = token(TENANT_A, claims -> claims.claim("flowops_roles", roles)
+                    .claim("scope", "flowops-operator"));
+            request(get("/api/v1/session"), bearer).andExpect(status().isOk())
+                    .andExpect(jsonPath("roles").isEmpty());
+            request(get("/api/v1/warehouses"), bearer).andExpect(status().isForbidden());
+            request(postJson("/api/v1/warehouses", "{}"), bearer).andExpect(status().isForbidden());
+        }
+        request(get("/api/v1/warehouses"), token(TENANT_A, claims -> claims.claim("flowops_roles", null)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void auditActorsComeFromIdentityAndReplaysKeepTheOriginalCreator() throws Exception {
+        String first = token(TENANT_A), second = token(TENANT_A, claims -> claims.subject("second-operator").claim("preferred_username", "second.operator"));
+        var flow = flow(first);
+        String movement = """
+                {"requestId":"%s","type":"RECEIPT","quantity":3,"reason":"Supplier delivery",
+                 "actorSubject":"forged-user","actorIssuer":"https://attacker.invalid"}
+                """.formatted(UUID.randomUUID());
+        JsonNode original = created(postJson(flow.stockPath() + "/movements", movement), first);
+        assertEquals("operator-a", original.path("actorSubject").asText());
+        assertEquals(ISSUER, original.path("actorIssuer").asText());
+        assertEquals("berlin.operator", original.path("actorName").asText());
+        request(postJson(flow.stockPath() + "/movements", movement), second).andExpect(status().isOk())
+                .andExpect(jsonPath("id").value(original.path("id").asText()))
+                .andExpect(jsonPath("actorSubject").value("operator-a"))
+                .andExpect(jsonPath("actorName").value("berlin.operator"));
+        request(post(flow.shipmentPath() + "/dispatch"), second).andExpect(status().isOk());
+        request(get(flow.stockPath() + "/movements"), first)
+                .andExpect(jsonPath("$[?(@.type == 'OPENING')].actorSubject").value(org.hamcrest.Matchers.contains("operator-a")))
+                .andExpect(jsonPath("$[?(@.type == 'DISPATCH')].actorSubject").value(org.hamcrest.Matchers.contains("second-operator")));
+        String transit = """
+                {"requestId":"%s","status":"IN_TRANSIT","note":"On route","actorSubject":"forged"}
+                """.formatted(UUID.randomUUID());
+        request(postJson(flow.shipmentPath() + "/status", transit), second).andExpect(status().isOk());
+        request(postJson(flow.shipmentPath() + "/status", transit), first).andExpect(status().isOk())
+                .andExpect(jsonPath("actorSubject").value("second-operator"));
+        request(postJson(flow.shipmentPath() + "/status", """
+                {"requestId":"%s","status":"DELIVERED","note":"Received"}
+                """.formatted(UUID.randomUUID())), first).andExpect(status().isOk());
+        request(get(flow.shipmentPath() + "/history"), first)
+                .andExpect(jsonPath("$[0].actorSubject").value("operator-a"))
+                .andExpect(jsonPath("$[1].actorSubject").value("second-operator"))
+                .andExpect(jsonPath("$[2].actorSubject").value("second-operator"))
+                .andExpect(jsonPath("$[3].actorSubject").value("operator-a"))
+                .andExpect(jsonPath("$[3].actorIssuer").value(ISSUER));
+        // The synchronous cancellation listener retains the cancelling operator's identity.
+        var cancellable = flow(first);
+        request(post(cancellable.orderPath() + "/cancel"), second).andExpect(status().isOk());
+        request(get(cancellable.shipmentPath() + "/history"), first)
+                .andExpect(jsonPath("$[1].status").value("CANCELLED"))
+                .andExpect(jsonPath("$[1].actorSubject").value("second-operator"));
+    }
+
+    @Test
+    void v9UpgradeDoesNotInventActorsOrChangeHistoricalBalances() {
+        try {
+            Flyway.configure().dataSource(dataSource).schemas("actor_upgrade").defaultSchema("actor_upgrade")
+                    .target("9").load().migrate();
+            UUID stock = UUID.randomUUID(), shipment = UUID.randomUUID();
+            jdbc.update("""
+                    INSERT INTO actor_upgrade.stock
+                    (id,tenant_id,warehouse_id,product_id,on_hand,reserved,version,created_at)
+                    VALUES (?,?,?,?,7,0,0,CURRENT_TIMESTAMP)
+                    """, stock, TENANT_A, UUID.randomUUID(), UUID.randomUUID());
+            jdbc.update("""
+                    INSERT INTO actor_upgrade.stock_movements
+                    (id,tenant_id,stock_id,type,quantity,on_hand_before,on_hand_after,reason,created_at)
+                    VALUES (?,?,?,'OPENING',7,0,7,'Old opening',CURRENT_TIMESTAMP)
+                    """, UUID.randomUUID(), TENANT_A, stock);
+            jdbc.update("""
+                    INSERT INTO actor_upgrade.shipments
+                    (id,tenant_id,order_id,warehouse_id,tracking_number,carrier,status,created_at)
+                    VALUES (?,?,?,?,?,'Local','PREPARED',CURRENT_TIMESTAMP)
+                    """, shipment, TENANT_A, UUID.randomUUID(), UUID.randomUUID(), "FLO-" + shipment);
+            jdbc.update("""
+                    INSERT INTO actor_upgrade.shipment_status_events
+                    (id,tenant_id,shipment_id,sequence,status,note,created_at)
+                    VALUES (?,?,?,1,'PREPARED','Old preparation',CURRENT_TIMESTAMP)
+                    """, UUID.randomUUID(), TENANT_A, shipment);
+            Flyway.configure().dataSource(dataSource).schemas("actor_upgrade").defaultSchema("actor_upgrade")
+                    .load().migrate();
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM actor_upgrade.stock_movements "
+                    + "WHERE actor_subject IS NULL AND actor_issuer IS NULL AND on_hand_after=7", Integer.class));
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM actor_upgrade.shipment_status_events "
+                    + "WHERE actor_subject IS NULL AND actor_issuer IS NULL AND status='PREPARED'", Integer.class));
+        } finally {
+            jdbc.execute("DROP SCHEMA IF EXISTS actor_upgrade CASCADE");
+        }
+    }
+
+    private record Flow(String warehouse, String reservation, String stockPath, String orderPath, String shipmentPath) {}
+    private Flow flow(String bearer) throws Exception {
+        String warehouse = created(postJson("/api/v1/warehouses", """
+                {"name":"Warehouse %s","city":"Berlin","countryCode":"DE"}
+                """.formatted(UUID.randomUUID())), bearer).path("id").asText();
+        String product = created(postJson("/api/v1/products", """
+                {"sku":"SKU-%s","name":"Laptop","weightKg":1.5}
+                """.formatted(UUID.randomUUID())), bearer).path("id").asText();
+        created(postJson("/api/v1/warehouses/" + warehouse + "/stock", """
+                {"productId":"%s","initialQuantity":10}
+                """.formatted(product)), bearer);
+        var order = created(postJson("/api/v1/orders", """
+                {"requestId":"%s","warehouseId":"%s","customerReference":"QA","items":[{"productId":"%s","quantity":2}]}
+                """.formatted(UUID.randomUUID(), warehouse, product)), bearer);
+        String shipment = created(postJson("/api/v1/shipments", """
+                {"orderId":"%s","carrier":"Local"}
+                """.formatted(order.path("id").asText())), bearer).path("id").asText();
+        return new Flow(warehouse, order.path("reservationId").asText(), "/api/v1/warehouses/" + warehouse + "/stock/" + product,
+                "/api/v1/orders/" + order.path("id").asText(), "/api/v1/shipments/" + shipment);
+    }
+
     private MockHttpServletRequestBuilder postJson(String path, String body) {
         return post(path).contentType(MediaType.APPLICATION_JSON).content(body);
     }
@@ -272,7 +419,8 @@ class SecurityApiTest extends PostgresIntegrationTest {
         return new JWTClaimsSet.Builder().issuer(ISSUER).audience("flowops-api")
                 .subject(tenant.equals(TENANT_A) ? "operator-a" : "operator-b")
                 .issueTime(Date.from(Instant.now())).expirationTime(Date.from(Instant.now().plusSeconds(300)))
-                .claim("tenant_id", tenant.toString()).claim("preferred_username", "berlin.operator");
+                .claim("tenant_id", tenant.toString()).claim("preferred_username", "berlin.operator")
+                .claim("flowops_roles", List.of("flowops-operator"));
     }
 
     private static String token(UUID tenant) throws Exception { return token(tenant, claims -> {}); }

@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
+import java.util.List;
 
 /** Lets the UI display the server-verified identity before loading tenant-owned resources. */
 @RestController
@@ -26,8 +27,8 @@ public class SessionController {
         Object preferredUsername = jwt.getClaims().get("preferred_username");
         String username = preferredUsername instanceof String name && !name.isBlank() ? name : jwt.getSubject();
         log.debug("Verified session read: tenantId={}", tenantId);
-        return new SessionResponse(jwt.getSubject(), username, tenantId);
+        return new SessionResponse(jwt.getSubject(), username, tenantId, FlowOpsRoles.names(jwt));
     }
 
-    public record SessionResponse(String subject, String username, UUID tenantId) {}
+    public record SessionResponse(String subject, String username, UUID tenantId, List<String> roles) {}
 }

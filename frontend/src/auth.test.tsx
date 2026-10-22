@@ -24,6 +24,7 @@ const session = {
   subject: "subject-1",
   username: "berlin.operator",
   tenantId: "tenant-1",
+  roles: ["operator"],
 };
 function client(current: User | null = null) {
   const events = { expired: () => {}, signedOut: () => {} };
@@ -223,4 +224,20 @@ describe("Workspace authentication", () => {
     expect(auth.getSnapshot().status).toBe("anonymous");
     expect(window.location.search).toBe("");
   });
+});
+
+it("keeps business screens closed when the verified account has no application role", async () => {
+  vi.mocked(fetch).mockResolvedValue(
+    new Response(JSON.stringify({ ...session, roles: [] })),
+  );
+  const { auth } = client(user());
+  activeAuth = auth;
+  render(<AuthGate auth={auth} />);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "no workspace access",
+  );
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(
+    screen.queryByRole("button", { name: "New order" }),
+  ).not.toBeInTheDocument();
 });

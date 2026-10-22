@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -16,6 +17,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.SupplierJwtDecoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
@@ -56,6 +58,8 @@ public class SecurityConfiguration {
             log.debug("Authorization rejected: exceptionType={}", exception.getClass().getSimpleName());
             writeError(response, 403, "Access denied");
         };
+        var identityConverter = new JwtAuthenticationConverter();
+        identityConverter.setJwtGrantedAuthoritiesConverter(FlowOpsRoles::authorities);
         http
                 // CSRF protection is unnecessary here: authentication uses an explicit Authorization
                 // header, never a browser-supplied cookie. Keep this decision under review if cookies are added.
@@ -66,11 +70,18 @@ public class SecurityConfiguration {
                         // An internal error dispatch must preserve the original response status.
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers("/actuator/health").permitAll()
-                        .requestMatchers("/api/v1/**").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/session").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/**").hasAnyRole("VIEWER", "OPERATOR")
+                        .requestMatchers(HttpMethod.HEAD, "/api/v1/**").hasAnyRole("VIEWER", "OPERATOR")
+                        // Default-deny new methods: an endpoint added later cannot accidentally grant viewer writes.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/**").hasRole("OPERATOR")
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/**").hasRole("OPERATOR")
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/**").hasRole("OPERATOR")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/**").hasRole("OPERATOR")
                         .anyRequest().denyAll())
                 .exceptionHandling(errors -> errors.authenticationEntryPoint(unauthorized)
                         .accessDeniedHandler(forbidden))
-                .oauth2ResourceServer(resource -> resource.jwt(jwt -> {})
+                .oauth2ResourceServer(resource -> resource.jwt(jwt -> jwt.jwtAuthenticationConverter(identityConverter))
                         .authenticationEntryPoint(unauthorized).accessDeniedHandler(forbidden));
         return http.build();
     }

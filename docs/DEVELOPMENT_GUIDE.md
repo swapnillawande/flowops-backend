@@ -146,11 +146,10 @@ messages, a Kafka outbox, or delivery guarantees to another service.
 
 ## Current boundaries
 
-OIDC authentication and tenant isolation are implemented. All tenant members
-currently share operational permissions; role restrictions and actor attribution
-are still future work. Standalone reservations
+OIDC authentication and tenant isolation are implemented. Viewers can read; operators can also write. Actor identity is recorded for
+stock movements and shipment history; order/reservation audit history is future work. Standalone reservations
 require explicit release; order-owned holds must be released through order cancellation.
-Expiration, partial release, delivery tracking, and returns remain future work.
+Expiration, partial release, automatic carrier tracking, and returns remain future work.
 Full-order shipments and dispatch are implemented; cancelling prepared shipments
 is coordinated through order cancellation. The bundled Keycloak start-dev setup is local infrastructure; production identity
 configuration and TLS must be provisioned before deployment. See the README for runnable API examples and the next milestones.
@@ -228,3 +227,27 @@ integration tests send signed JWTs through the real decoding/filter chain, inclu
 invalid signatures/claims and cross-tenant access. No test-only security bypass is
 packaged in the application. Existing activity loggers remain commit-aware; user
 names, credentials, and tokens must not appear in operational logs.
+
+## Roles and audit attribution
+
+`FlowOpsRoles` converts only the signed `flowops_roles` array into the two known
+application authorities. Security rules allow authenticated session inspection,
+require viewer/operator for GET/HEAD business reads, and operator for write methods.
+Every other route/method stays denied. Do not infer access from names, UI controls,
+or OAuth scopes. Tenant-scoped service lookups remain necessary even for operators.
+
+`ActorAttributed` is a mapped superclass used by stock movements and shipment
+status events. Its insertion listener reads the already-verified JWT before
+persistence and records issuer plus subject, with an optional username snapshot for
+human-readable history. The name never grants access. It runs inside the existing business
+transaction, including synchronous cancellation callbacks. Failure rolls back the
+actor fields with the history row; after-commit activity logging remains unchanged.
+No client DTO accepts these values as authority. The columns are not updated by
+JPA, so retries and later state changes preserve the original actor.
+
+V10 adds nullable fields and a paired-value constraint. Null is honest for pre-V10
+history and unauthenticated internal service work; it does not mean the current
+operator created those rows. Do not add an automatic system fallback that obscures
+who initiated a job. A future background workflow needs an explicit system identity.
+Signed-token integration tests cover role enforcement and actor provenance; the
+migration test upgrades an isolated V9 schema without altering existing history.

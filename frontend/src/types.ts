@@ -47,7 +47,7 @@ export interface Shipment {
   status: Status;
   createdAt: string;
 }
-export interface HistoryEvent {
+export interface HistoryEvent extends AuditActor {
   id: string;
   sequence: number;
   status: Status;
@@ -70,7 +70,7 @@ export interface OrderDetail extends Order {
   deliveredAt: string | null;
   cancelledAt: string | null;
 }
-export interface StockMovement {
+export interface StockMovement extends AuditActor {
   id: string;
   type: "OPENING" | "RECEIPT" | "ADJUSTMENT" | "DISPATCH";
   quantity: number;
@@ -79,4 +79,11 @@ export interface StockMovement {
   reason: string;
   shipmentId: string | null;
   createdAt: string;
+}
+
+/** Immutable OIDC identity. Null means historical or non-user work without recorded attribution. */
+export interface AuditActor {
+  actorSubject?: string | null;
+  actorIssuer?: string | null;
+  actorName?: string | null;
 }

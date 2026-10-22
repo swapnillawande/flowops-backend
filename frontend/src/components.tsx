@@ -13,7 +13,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import { api } from "./api";
-import type { HistoryEvent, Status } from "./types";
+import type { HistoryEvent, Status, AuditActor } from "./types";
 
 export const label = (value: string) =>
   value.toLowerCase().replaceAll("_", " ");
@@ -204,9 +204,28 @@ export function History({ id }: { id: string }) {
             <Badge status={event.status} />
             <p>{event.note}</p>
             <small>{date(event.createdAt)}</small>
+            <ActorIdentity actor={event} />
           </div>
         </li>
       ))}
     </ol>
+  );
+}
+
+/** Subject + issuer remain identifiable even if an operator later changes their display name. */
+export function ActorIdentity({ actor }: { actor: AuditActor }) {
+  return (
+    <small className="audit-actor">
+      Recorded by:{" "}
+      {actor.actorSubject && actor.actorIssuer ? (
+        <span
+          title={`Identity provider: ${actor.actorIssuer}; Subject: ${actor.actorSubject}`}
+        >
+          {actor.actorName || actor.actorSubject}
+        </span>
+      ) : (
+        "Not recorded"
+      )}
+    </small>
   );
 }

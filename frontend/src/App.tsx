@@ -91,6 +91,8 @@ export default function App({
   session?: WorkspaceSession;
   onSignOut?: () => Promise<void>;
 }) {
+  // This controls presentation; the API independently enforces every read/write permission.
+  const canWrite = session ? session.roles.includes("operator") : true;
   const [tab, setTab] = useState<Tab>("overview"),
     [dialog, setDialog] = useState<Dialog | null>(null);
   const [orders, setOrders] = useState(emptyPage<Order>),
@@ -190,7 +192,7 @@ export default function App({
                 </td>
                 <td>
                   <div className="row-actions">
-                    {order.status === "CONFIRMED" ? (
+                    {canWrite && order.status === "CONFIRMED" ? (
                       <>
                         <button
                           onClick={() => setDialog({ kind: "prepare", order })}
@@ -214,11 +216,13 @@ export default function App({
                       </>
                     ) : (
                       <span className="muted">
-                        {order.status === "CANCELLED"
-                          ? "Stock released"
-                          : order.status === "DELIVERED"
-                            ? "Completed"
-                            : "Stock dispatched"}
+                        {order.status === "CONFIRMED"
+                          ? "Read-only access"
+                          : order.status === "CANCELLED"
+                            ? "Stock released"
+                            : order.status === "DELIVERED"
+                              ? "Completed"
+                              : "Stock dispatched"}
                       </span>
                     )}
                   </div>
@@ -263,7 +267,13 @@ export default function App({
                   <Badge status={shipment.status} />
                 </td>
                 <td>
-                  {shipment.status === "PREPARED" ? (
+                  {!canWrite ? (
+                    <button
+                      onClick={() => setDialog({ kind: "history", shipment })}
+                    >
+                      View history
+                    </button>
+                  ) : shipment.status === "PREPARED" ? (
                     <button
                       className="action-button"
                       onClick={() => confirmDispatch(shipment)}
@@ -376,7 +386,11 @@ export default function App({
             <div>
               <div className="eyebrow">FLOWOPS CONTROL TOWER</div>
               <h1>{titles[tab][0]}</h1>
-              <p>{titles[tab][1]}</p>
+              <p>
+                {tab === "catalog" && !canWrite
+                  ? "Browse warehouse stock and its recorded history."
+                  : titles[tab][1]}
+              </p>
             </div>
             <div className="header-actions">
               <button
@@ -387,16 +401,24 @@ export default function App({
               >
                 <RefreshCw size={17} className={loading ? "spin" : ""} />
               </button>
-              <button
-                className="primary"
-                disabled={loading || !!error}
-                onClick={() => setDialog({ kind: "order" })}
-              >
-                <Plus size={17} />
-                New order
-              </button>
+              {canWrite && (
+                <button
+                  className="primary"
+                  disabled={loading || !!error}
+                  onClick={() => setDialog({ kind: "order" })}
+                >
+                  <Plus size={17} />
+                  New order
+                </button>
+              )}
             </div>
           </div>
+          {!canWrite && (
+            <div className="notice" role="status">
+              Read-only access · You can browse records and history. Ask an
+              operator to make changes.
+            </div>
+          )}
           {error && (
             <div className="notice error" role="alert">
               <strong>Data could not be refreshed.</strong> {error}{" "}
@@ -562,8 +584,9 @@ export default function App({
           )}
           {tab === "catalog" && (
             <>
-              <CatalogForms done={done} />
+              {canWrite && <CatalogForms done={done} />}
               <Inventory
+                canWrite={canWrite}
                 warehouses={warehouses}
                 products={products}
                 revision={revision}
@@ -643,11 +666,13 @@ export default function App({
 }
 /** Inventory reads are scoped by the selected warehouse, never joined across tenants in the browser. */
 function Inventory({
+  canWrite,
   warehouses,
   products,
   revision,
   done,
 }: {
+  canWrite: boolean;
   warehouses: Warehouse[];
   products: Product[];
   revision: number;
@@ -702,7 +727,7 @@ function Inventory({
           </select>
         </label>
       </div>
-      <div className="inventory-layout">
+      <div className={canWrite ? "inventory-layout" : "inventory-readonly"}>
         <div>
           {error ? (
             <p role="alert" className="form-error">
@@ -752,17 +777,19 @@ function Inventory({
                       </td>
                       <td>
                         <div className="row-actions">
-                          <button
-                            onClick={() =>
-                              setStockDialog({
-                                kind: "movement",
-                                warehouseId: selected,
-                                productId: item.productId,
-                              })
-                            }
-                          >
-                            Record movement
-                          </button>
+                          {canWrite && (
+                            <button
+                              onClick={() =>
+                                setStockDialog({
+                                  kind: "movement",
+                                  warehouseId: selected,
+                                  productId: item.productId,
+                                })
+                              }
+                            >
+                              Record movement
+                            </button>
+                          )}
                           <button
                             onClick={() =>
                               setStockDialog({
@@ -783,18 +810,20 @@ function Inventory({
             </div>
           )}
         </div>
-        <div className="stock-form">
-          <h3>
-            <ArrowDownLeft size={17} />
-            Opening stock
-          </h3>
-          <OpeningForm
-            key={`${selected}-${products.map((product) => product.id).join()}`}
-            warehouseId={selected}
-            products={products}
-            done={done}
-          />
-        </div>
+        {canWrite && (
+          <div className="stock-form">
+            <h3>
+              <ArrowDownLeft size={17} />
+              Opening stock
+            </h3>
+            <OpeningForm
+              key={`${selected}-${products.map((product) => product.id).join()}`}
+              warehouseId={selected}
+              products={products}
+              done={done}
+            />
+          </div>
+        )}
       </div>
       {stockDialog && (
         <Modal

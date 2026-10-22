@@ -118,3 +118,81 @@ describe("Operations console", () => {
     expect(document.querySelector("script")).toBeNull();
   });
 });
+
+describe("Viewer permissions", () => {
+  const session = {
+    subject: "viewer",
+    username: "berlin.viewer",
+    tenantId: "tenant-1",
+    roles: ["viewer" as const],
+  };
+  it("keeps order and shipment history available while hiding fulfillment controls", async () => {
+    vi.mocked(api).mockImplementation(async (path) => {
+      if (path.startsWith("/orders"))
+        return {
+          content: [
+            {
+              id: "order-1",
+              warehouseId: warehouse.id,
+              customerReference: "Customer",
+              status: "CONFIRMED",
+              createdAt: "2026-10-22T10:00:00Z",
+              items: [],
+            },
+          ],
+          totalElements: 1,
+          totalPages: 1,
+        } as never;
+      if (path.startsWith("/shipments"))
+        return {
+          content: [shipment],
+          totalElements: 1,
+          totalPages: 1,
+        } as never;
+      if (path === "/warehouses") return [warehouse] as never;
+      return [product] as never;
+    });
+    render(<App session={session} />);
+    expect(
+      await screen.findByText("Read-only access", { exact: false }),
+    ).toBeInTheDocument();
+    await screen.findByText("Customer");
+    expect(
+      screen.queryByRole("button", { name: "New order" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Prepare shipment" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Cancel" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Mark in transit" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "View history" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /#order/i })).toBeInTheDocument();
+  });
+  it("allows stock and ledger browsing without catalog or balance forms", async () => {
+    render(<App session={session} />);
+    await screen.findByText("123");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Catalog & stock" }),
+    );
+    expect(
+      await screen.findByRole("button", { name: "History" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Record movement" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Add warehouse" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Add product" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Opening quantity")).not.toBeInTheDocument();
+    expect(post).not.toHaveBeenCalled();
+  });
+});

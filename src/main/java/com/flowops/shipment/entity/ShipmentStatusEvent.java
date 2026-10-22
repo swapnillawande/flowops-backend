@@ -8,7 +8,7 @@ import java.util.UUID;
 /** Append-only through the API; sequence preserves transition order even when timestamps tie. */
 @Entity
 @Table(name = "shipment_status_events")
-public class ShipmentStatusEvent {
+public class ShipmentStatusEvent extends com.flowops.audit.ActorAttributed {
     @Id private UUID id;
     @Column(name = "tenant_id", nullable = false) private UUID tenantId;
     @Column(name = "shipment_id", nullable = false) private UUID shipmentId;

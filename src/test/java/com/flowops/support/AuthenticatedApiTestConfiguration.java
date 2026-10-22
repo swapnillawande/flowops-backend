@@ -15,6 +15,8 @@ public class AuthenticatedApiTestConfiguration {
     MockMvcBuilderCustomizer authenticatedBusinessRequests() {
         // SecurityApiTest deliberately does not import this fixture: it exercises real signed bearer tokens.
         return builder -> builder.defaultRequest(get("/").with(jwt().jwt(token -> token
-                .subject("test-operator").claim("tenant_id", DemoTenant.ID.toString()))));
+                .subject("test-operator").claim("iss", "https://identity.flowops.test/realms/flowops")
+                .claim("tenant_id", DemoTenant.ID.toString()))
+                .authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_OPERATOR"))));
     }
 }

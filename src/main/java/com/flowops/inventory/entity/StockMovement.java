@@ -12,7 +12,7 @@ import java.util.UUID;
 /** Append-only through the API: immutable evidence of a physical quantity change in the same transaction. */
 @Entity
 @Table(name = "stock_movements")
-public class StockMovement {
+public class StockMovement extends com.flowops.audit.ActorAttributed {
     @Id
     private UUID id;
     @Column(name = "tenant_id", nullable = false)

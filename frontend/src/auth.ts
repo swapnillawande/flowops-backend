@@ -12,6 +12,7 @@ export type WorkspaceSession = {
   subject: string;
   username: string;
   tenantId: string;
+  roles: ("operator" | "viewer")[];
 };
 export type AuthState =
   | { status: "loading" }
@@ -158,9 +159,17 @@ export class AuthController {
         !session.subject ||
         session.subject !== user.profile.sub ||
         !session.tenantId ||
-        !session.username
+        !session.username ||
+        !Array.isArray(session.roles) ||
+        !session.roles.some((role) => role === "operator" || role === "viewer")
       ) {
-        throw new Error("Invalid workspace session");
+        this.clear();
+        this.update({
+          status: "error",
+          message:
+            "Your account has no workspace access. Ask your administrator to assign a viewer or operator role, then sign in again.",
+        });
+        return;
       }
       this.update({ status: "ready", session });
     } catch {

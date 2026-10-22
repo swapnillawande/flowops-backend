@@ -44,7 +44,9 @@ TLS and matching identity-provider redirect origins; see the root README.
 
 Choose **Sign in** and use `berlin.operator` / `flowops_local_only`. This account
 sees the existing demo organization. `hamburg.operator` with the same local password
-belongs to a different organization and starts without records. Use **Sign out**
+belongs to a different organization and starts without records. `berlin.viewer`
+with the same local password can browse Berlin records and history without write
+controls. The API also rejects viewer commands, including requests outside the UI. Use **Sign out**
 before switching. These seeded accounts are local test credentials only.
 
 The default provider is `http://localhost:8082/realms/flowops` with client
@@ -112,7 +114,7 @@ there is no live push channel yet.
 
 The overview shows server-reported order/shipment totals. Tables and activity show
 the current page; no delivery-rate or other aggregate metrics are invented. Catalog
-lists are currently unpaginated, matching the backend's local-demo API. Full catalog editing, role-based permissions, and automatic/live tracking are later milestones.
+lists are currently unpaginated, matching the backend's local-demo API. Full catalog editing and automatic/live tracking are later milestones.
 
 ## Inventory changes and detail views
 
@@ -138,3 +140,15 @@ History displays opening balances, receipts, adjustments, and shipment deduction
 with signed quantities, reasons, timestamps, and before/after balances. Reasons
 are rendered as plain text. Reservations are not physical movements and therefore
 do not appear in this ledger. Read and write failures are shown explicitly.
+
+## Permissions and recorded actors
+
+`/session` supplies the verified application roles. Only operators see catalog
+forms, new-order, movement, cancellation, dispatch, or delivery controls. Viewers
+keep navigation, paging, order details, stock selection, and history. An account
+with no recognized role stays at the sign-in boundary with an administrator action.
+
+Movement and shipment timelines show the operator name captured with each entry,
+falling back to its immutable subject. Issuer and subject are available as a tooltip. Values render as plain text.
+Historical/non-user entries display **Not recorded**, without inventing an actor.
+Changing an operator's display name does not rewrite past history.
