@@ -5,7 +5,8 @@ export type Status =
   | "DISPATCHED"
   | "IN_TRANSIT"
   | "DELIVERED"
-  | "CANCELLED";
+  | "CANCELLED"
+  | "EXPIRED";
 export interface Warehouse {
   id: string;
   name: string;
@@ -29,6 +30,8 @@ export interface Order {
   id: string;
   warehouseId: string;
   customerReference: string;
+  reservationExpiresAt?: string | null;
+  expiredAt?: string | null;
   status: Status;
   createdAt: string;
   items: {
@@ -81,7 +84,7 @@ export interface StockMovement extends AuditActor {
   createdAt: string;
 }
 
-/** Immutable OIDC identity. Null means historical or non-user work without recorded attribution. */
+/** Immutable actor identity: an OIDC user or an explicitly named system job. Null means unrecorded. */
 export interface AuditActor {
   actorSubject?: string | null;
   actorIssuer?: string | null;

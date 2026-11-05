@@ -8,6 +8,10 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 public class ActorAttributionListener {
     @PrePersist
     public void beforeInsert(ActorAttributed record) {
+        if (SystemActor.isReservationExpiry()) {
+            record.captureActor("urn:flowops:system", "reservation-expiry", "Automatic reservation expiry");
+            return;
+        }
         var authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication instanceof JwtAuthenticationToken bearer && bearer.isAuthenticated()) {
             var jwt = bearer.getToken();
@@ -17,7 +21,7 @@ public class ActorAttributionListener {
             record.captureActor(jwt.getClaimAsString("iss"), jwt.getSubject(), name);
         }
         // Migrations and direct background/service work may have no user. Preserve null rather than
-        // inventing an operator. Any future scheduled workflow must define its own system attribution.
+        // inventing an operator. Other scheduled workflows must define their own system attribution.
         // A replay loads an existing row and never runs PrePersist, preserving its original actor.
     }
 }

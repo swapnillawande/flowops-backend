@@ -17,6 +17,8 @@ public abstract class PostgresIntegrationTest {
 
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
+        // Tests invoke expiry explicitly with a controlled clock; background scans must not race assertions.
+        registry.add("flowops.reservations.expiry-enabled", () -> "false");
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);

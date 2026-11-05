@@ -21,6 +21,11 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
+import java.time.OffsetDateTime;
+import java.util.List;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.transaction.annotation.Propagation;
 import java.util.Objects;
 import java.util.Map;
 import java.util.TreeMap;
@@ -30,6 +35,8 @@ import java.util.UUID;
 @Service
 public class ReservationService {
     private static final Logger log = LoggerFactory.getLogger(ReservationService.class);
+    private final Clock clock;
+    private final ReservationPolicy policy;
     private final ReservationRepository reservations;
     private final ReservationItemRepository items;
     private final StockRepository stocks;
@@ -39,7 +46,9 @@ public class ReservationService {
 
     public ReservationService(ReservationRepository reservations, ReservationItemRepository items,
                               StockRepository stocks, WarehouseService warehouses, ApplicationEventPublisher events,
-                              StockMovementRepository movements) {
+                              StockMovementRepository movements, Clock clock, ReservationPolicy policy) {
+        this.clock = clock;
+        this.policy = policy;
         this.reservations = reservations;
         this.items = items;
         this.stocks = stocks;
@@ -89,7 +98,9 @@ public class ReservationService {
 
         requested.forEach((product, quantity) -> locked.get(product).reserve(quantity));
         // Flush the parent first to enforce the unique request key before persisting child rows.
-        var reservation = reservations.saveAndFlush(new InventoryReservation(tenantId, warehouseId, request.requestId(), orderId));
+        var now = OffsetDateTime.now(clock);
+        var reservation = reservations.saveAndFlush(new InventoryReservation(tenantId, warehouseId,
+                request.requestId(), orderId, now, now.plus(policy.holdTtl())));
         var savedItems = items.saveAll(requested.entrySet().stream()
                 .map(item -> new ReservationItem(tenantId, reservation.getId(), item.getKey(), item.getValue())).toList());
         events.publishEvent(new InventoryActivity("RESERVATION_CREATED", tenantId, warehouseId, reservation.getId()));
@@ -156,6 +167,8 @@ public class ReservationService {
         Map<UUID, Integer> quantities = new TreeMap<>();
         heldItems.forEach(item -> quantities.put(item.getProductId(), item.getQuantity()));
         var locked = lockStocks(tenantId, warehouseId, quantities);
+        // Recheck after waiting for all stock locks: cleanup lag never permits a late new dispatch.
+        requireUnexpired(reservation);
         quantities.forEach((productId, quantity) -> {
             Stock stock = locked.get(productId);
             int before = stock.getOnHand();
@@ -164,6 +177,56 @@ public class ReservationService {
         });
         reservation.consume(shipmentId);
         events.publishEvent(new InventoryActivity("RESERVATION_CONSUMED", tenantId, warehouseId, reservationId));
+    }
+
+    public record ExpiryCandidate(UUID id, UUID tenantId, UUID warehouseId, UUID ownerOrderId) {}
+
+    @Transactional(readOnly = true)
+    public List<ExpiryCandidate> findDue(OffsetDateTime cutoff, int limit) {
+        return reservations.findDue(cutoff, PageRequest.of(0, limit)).stream()
+                .map(row -> new ExpiryCandidate(row.getId(), row.getTenantId(), row.getWarehouseId(), row.getOwnerOrderId())).toList();
+    }
+
+    /** Order lock is already held. New shipment preparation cannot use a deadline that has passed. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void requireUsableForOrder(UUID tenantId, UUID warehouseId, UUID reservationId, UUID orderId) {
+        var hold = reservations.findForUpdate(reservationId, tenantId, warehouseId)
+                .orElseThrow(ReservationNotFoundException::new);
+        requireOwner(hold, orderId);
+        if (!hold.isActive()) throw new ReservationConflictException("Only active holds can be prepared");
+        requireUnexpired(hold);
+    }
+
+    private void requireUnexpired(InventoryReservation hold) {
+        if (hold.isDue(OffsetDateTime.now(clock))) {
+            throw new ReservationConflictException("Reservation deadline has passed; stock release is pending automatic cleanup");
+        }
+    }
+
+    @Transactional(timeout = 15)
+    public boolean expireStandalone(UUID tenantId, UUID warehouseId, UUID reservationId) {
+        return expireInternal(tenantId, warehouseId, reservationId, null) != null;
+    }
+
+    /** Caller holds the order lock; never take an order lock while holding an inventory lock. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public OffsetDateTime expireForOrder(UUID tenantId, UUID warehouseId, UUID reservationId, UUID orderId) {
+        return expireInternal(tenantId, warehouseId, reservationId, Objects.requireNonNull(orderId));
+    }
+
+    private OffsetDateTime expireInternal(UUID tenantId, UUID warehouseId, UUID reservationId, UUID orderId) {
+        var hold = reservations.findForUpdate(reservationId, tenantId, warehouseId)
+                .orElseThrow(ReservationNotFoundException::new);
+        requireOwner(hold, orderId);
+        if (!hold.isDue(OffsetDateTime.now(clock))) return null;
+        Map<UUID, Integer> quantities = new TreeMap<>();
+        items.findByTenantIdAndReservationIdOrderByProductIdAsc(tenantId, reservationId)
+                .forEach(item -> quantities.put(item.getProductId(), item.getQuantity()));
+        var locked = lockStocks(tenantId, warehouseId, quantities);
+        quantities.forEach((productId, quantity) -> locked.get(productId).releaseReserved(quantity));
+        hold.expire(OffsetDateTime.now(clock));
+        events.publishEvent(new InventoryActivity("RESERVATION_EXPIRED", tenantId, warehouseId, reservationId));
+        return hold.getExpiredAt();
     }
 
     private void requireOwner(InventoryReservation reservation, UUID orderId) {

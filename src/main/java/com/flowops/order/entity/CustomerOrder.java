@@ -21,12 +21,16 @@ public class CustomerOrder {
     @Column(name = "delivered_at") private OffsetDateTime deliveredAt;
     @Column(name = "cancelled_at") private OffsetDateTime cancelledAt;
 
+    @Column(name = "reservation_expires_at") private OffsetDateTime reservationExpiresAt;
+    @Column(name = "expired_at") private OffsetDateTime expiredAt;
+
     protected CustomerOrder() {} // Creation uses the repository's atomic request-key claim.
 
     /** Only creation may attach the newly created hold; it is committed with the order. */
-    public void confirm(UUID reservationId) {
+    public void confirm(UUID reservationId, OffsetDateTime reservationExpiresAt) {
         if (!"PENDING".equals(status)) throw new IllegalStateException("Only pending orders can be confirmed");
         this.reservationId = reservationId;
+        this.reservationExpiresAt = reservationExpiresAt;
         status = "CONFIRMED";
     }
 
@@ -44,6 +48,14 @@ public class CustomerOrder {
         dispatchedAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 
+    /** Called only after the inventory hold is expired in this same transaction. */
+    public void expire(OffsetDateTime at) {
+        if (!"CONFIRMED".equals(status)) throw new IllegalStateException("Only confirmed orders can expire");
+        status = "EXPIRED";
+        expiredAt = at;
+    }
+    public OffsetDateTime getReservationExpiresAt() { return reservationExpiresAt; }
+    public OffsetDateTime getExpiredAt() { return expiredAt; }
     public OffsetDateTime getDispatchedAt() { return dispatchedAt; }
     /** Delivery completes fulfillment; stock was deducted at dispatch and is never deducted here. */
     public void deliver() {

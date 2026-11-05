@@ -8,6 +8,7 @@ import com.flowops.order.entity.CustomerOrder;
 import com.flowops.order.entity.OrderItem;
 import com.flowops.order.event.OrderActivity;
 import com.flowops.order.event.OrderCancellation;
+import com.flowops.order.event.OrderExpiration;
 import com.flowops.order.exception.OrderConflictException;
 import com.flowops.order.exception.OrderNotFoundException;
 import com.flowops.order.repository.OrderItemRepository;
@@ -81,7 +82,7 @@ public class OrderService {
         var holdRequest = new CreateReservationRequest(order.getId(), requested.entrySet().stream()
                 .map(item -> new CreateReservationRequest.Item(item.getKey(), item.getValue())).toList());
         var hold = inventory.reserveForOrder(tenantId, request.warehouseId(), order.getId(), holdRequest).response();
-        order.confirm(hold.id());
+        order.confirm(hold.id(), hold.expiresAt());
         var savedItems = items.saveAll(snapshots);
         events.publishEvent(new OrderActivity("ORDER_CONFIRMED", tenantId, order.getId()));
         return new Result(OrderResponse.from(order, savedItems), true);
@@ -110,6 +111,27 @@ public class OrderService {
     @Transactional
     public OrderResponse lockForFulfillment(UUID tenantId, UUID orderId) {
         return response(tenantId, orders.findForUpdate(orderId, tenantId).orElseThrow(OrderNotFoundException::new));
+    }
+
+    /** Recheck the immutable deadline while holding the order/reservation locks before preparation. */
+    @Transactional
+    public void requireUsableHold(UUID tenantId, UUID orderId) {
+        var order = orders.findForUpdate(orderId, tenantId).orElseThrow(OrderNotFoundException::new);
+        inventory.requireUsableForOrder(tenantId, order.getWarehouseId(), order.getReservationId(), orderId);
+    }
+
+    /** One candidate per transaction; order -> reservation -> stock preserves dispatch's lock order. */
+    @Transactional(timeout = 15)
+    public boolean expireReservation(UUID tenantId, UUID orderId, UUID reservationId) {
+        var order = orders.findForUpdate(orderId, tenantId).orElseThrow(OrderNotFoundException::new);
+        if (!"CONFIRMED".equals(order.getStatus()) || !reservationId.equals(order.getReservationId())) return false;
+        var expiredAt = inventory.expireForOrder(tenantId, order.getWarehouseId(), reservationId, orderId);
+        if (expiredAt == null) return false;
+        order.expire(expiredAt);
+        // The listener cancels a prepared shipment and records the system actor before commit.
+        events.publishEvent(new OrderExpiration(tenantId, orderId, expiredAt));
+        events.publishEvent(new OrderActivity("ORDER_EXPIRED", tenantId, orderId));
+        return true;
     }
 
     /** No public order-dispatch HTTP command: shipment dispatch owns this orchestration. */

@@ -41,10 +41,13 @@ public class Shipment {
         dispatchedAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
     /** Only the order cancellation workflow invokes this transition; dispatch is terminal for cancellation. */
-    public void cancel() {
+    public void cancel() { cancel(OffsetDateTime.now(ZoneOffset.UTC)); }
+
+    /** Automatic expiry supplies the same timestamp used for the hold, order, and history. */
+    public void cancel(OffsetDateTime at) {
         if (!"PREPARED".equals(status)) throw new ShipmentConflictException("Only prepared shipments can be cancelled");
         status = "CANCELLED";
-        cancelledAt = OffsetDateTime.now(ZoneOffset.UTC);
+        cancelledAt = java.util.Objects.requireNonNull(at);
     }
     /** No skipping or regressing states: physical dispatch must already have happened. */
     public void advance(String next) {

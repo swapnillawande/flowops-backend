@@ -216,3 +216,36 @@ it("shows immutable actor identifiers as text and does not invent historical act
   ).toBeInTheDocument();
   expect(container.querySelector("script")).toBeNull();
 });
+
+it("shows an expired hold's deadline, completion time, and released-stock explanation", async () => {
+  vi.mocked(api).mockResolvedValue({
+    ...fixture,
+    status: "EXPIRED",
+    reservationExpiresAt: "2026-11-05T10:30:00Z",
+    expiredAt: "2026-11-05T10:31:00Z",
+  });
+  render(<OrderDetails id="order-1" warehouses={[]} />);
+  expect(await screen.findByText("Stock hold deadline")).toBeInTheDocument();
+  expect(screen.getByText("Expired")).toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "reserved units were released",
+  );
+  expect(
+    screen.queryByText("No automatic deadline (legacy hold)"),
+  ).not.toBeInTheDocument();
+});
+
+it("does not invent a deadline for a legacy order", async () => {
+  vi.mocked(api).mockResolvedValue({
+    ...fixture,
+    reservationExpiresAt: null,
+    expiredAt: null,
+  });
+  render(<OrderDetails id="order-1" warehouses={[]} />);
+  expect(
+    await screen.findByText("No automatic deadline (legacy hold)"),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByText("Expired", { exact: true }),
+  ).not.toBeInTheDocument();
+});

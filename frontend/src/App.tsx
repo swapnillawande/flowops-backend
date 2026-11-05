@@ -220,9 +220,11 @@ export default function App({
                           ? "Read-only access"
                           : order.status === "CANCELLED"
                             ? "Stock released"
-                            : order.status === "DELIVERED"
-                              ? "Completed"
-                              : "Stock dispatched"}
+                            : order.status === "EXPIRED"
+                              ? "Hold expired · stock released"
+                              : order.status === "DELIVERED"
+                                ? "Completed"
+                                : "Stock dispatched"}
                       </span>
                     )}
                   </div>

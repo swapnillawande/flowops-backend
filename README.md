@@ -107,7 +107,7 @@ and an optional `actorName` snapshot, captured from the verified identity inside
 stock, receipts, adjustments, dispatch, preparation, cancellation, transit, and
 delivery. Replays keep the original actor. V10 preserves old records with null
 actors; the UI displays **Not recorded**. Non-user service work also remains null
-until a system-identity policy is defined. Subject plus issuer identify the OIDC
+except for the explicitly attributed reservation-expiry worker. Subject plus issuer identify the OIDC
 user; the stored name is an informative label captured at that time and never
 grants access. Other business records do not yet have an actor ledger.
 Production identity deployment is still a separate milestone. Existing JWTs remain
@@ -296,7 +296,9 @@ or out-of-scope warehouses, stock, and reservation lookups return `404`. Every
 stock row is locked in consistent product-ID order. Different requests with the
 same retry key are also protected by a database unique constraint.
 
-Standalone reservations require explicit full release and do not expire automatically.
+New standalone and order-owned reservations have a fixed expiry deadline.
+Legacy holds created before V11 have no automatic deadline and still require release
+or order cancellation. See automatic expiry below.
 Order-created reservations expose an `ownerOrderId`; release these through order
 cancellation. Direct release or standalone retry of an order-owned reservation
 returns `409`. Partial release and reservation actor history remain future work. Dispatch consumes an
@@ -304,6 +306,55 @@ order-owned hold; consumed units cannot be released. Reservation creation/releas
 after commit; DEBUG logging adds replay/lookup details. See the
 [development guide](docs/DEVELOPMENT_GUIDE.md) for a code walkthrough, comments,
 transaction handling, logging conventions, and how to enable DEBUG locally.
+
+## Automatic reservation expiry
+
+![Automatically expired order from isolated QA](docs/images/expired-order.png)
+
+New holds expire after **30 minutes** by default. The server assigns an immutable
+`expiresAt`; callers cannot choose or renew it. Orders snapshot it as
+`reservationExpiresAt`, visible in the order details dialog. A replay keeps the
+original deadline and never reopens an expired hold.
+
+Every minute, an internal worker scans up to 100 due holds, oldest first. For each
+candidate it rechecks the deadline/status under locks and commits one transaction:
+
+- Standalone hold: return its reserved units and mark it `EXPIRED` with `expiredAt`.
+- Order-owned hold: also mark the order `EXPIRED` and cancel any prepared shipment.
+- Prepared shipment history records **Reservation expired before dispatch** with
+  system issuer `urn:flowops:system`, subject `reservation-expiry`, and readable name
+  **Automatic reservation expiry**. All related expiry timestamps use one event time.
+
+Physical `onHand` stock is unchanged; expiry is not a receipt or physical stock
+movement. Released, consumed, cancelled, delivered, and already-expired work is
+left alone. Manual cancellation/release can win a race with expiry, but units are
+returned only once. Successful dispatch replays remain valid after the old deadline.
+
+A new preparation or dispatch cannot use an overdue hold even before cleanup runs;
+it returns `409`. Until cleanup commits, the units remain reserved. Cleanup may
+run later than the deadline because of scan intervals, backlog, locks, or downtime;
+it catches up on persisted deadlines when running again. Refresh the console to
+load the updated status and balances. There is no live push channel or browser timer
+that frees stock.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `RESERVATION_HOLD_TTL` | `PT30M` | Lifetime assigned to new holds; one second to seven days |
+| `RESERVATION_EXPIRY_ENABLED` | `true` | Enable scheduled cleanup |
+| `RESERVATION_EXPIRY_INTERVAL` | `PT1M` | Positive fixed delay, also used as the first-run delay |
+| `RESERVATION_EXPIRY_BATCH_SIZE` | `100` | Due candidates per run, from 1 to 1000 |
+
+Durations use ISO-8601 syntax. Changing the lifetime affects future holds only.
+Disabling cleanup does **not** disable deadline checks at preparation/dispatch;
+re-enable it to return overdue held units. Pre-V11 holds deliberately keep null
+deadlines so upgrading does not unexpectedly cancel existing orders. They can be
+released/cancelled manually, or dispatched through their existing workflow.
+
+There is no public expiry command. Candidate processing is safe to retry and uses
+order → reservation → stock lock order. Each candidate has its own transaction;
+one failure is logged with identifiers and retried later while other candidates
+can commit. Batches are bounded; persistent data/constraint failures need operator
+attention and may slow backlog processing. Success activity logs run after commit.
 
 ## Create and cancel orders
 
@@ -494,8 +545,8 @@ cross-tenant reads and writes; the business suite uses explicit authenticated fi
 
 ## Next milestones
 
-1. Add reservation expiry coordinated with order cancellation.
-2. Extend actor auditing to order and reservation lifecycles.
+1. Extend actor auditing to order and reservation lifecycles.
+2. Add CI checks for the complete backend and frontend workflow.
 3. Add Kafka with transactional outbox publishing and idempotent consumers.
 4. Integrate local Ollama for shipment explanations; keep inventory decisions deterministic.
 5. Add container packaging, Kubernetes manifests, CI, and observability.
@@ -516,3 +567,8 @@ Browser QA also verified an operator-created opening balance and the same ledger
 viewed by `berlin.viewer`, with write controls hidden:
 
 ![Viewer reading operator-attributed stock history](docs/images/viewer-audit-history.png)
+
+Live QA used a disposable database with a 60-second hold lifetime and a two-second
+cleanup interval. A prepared three-unit order expired automatically, its shipment
+was cancelled, and stock returned to 10 on hand / 0 reserved. The normal default
+remains 30 minutes. [Automatic cancellation history](docs/images/expiry-shipment-history.png).

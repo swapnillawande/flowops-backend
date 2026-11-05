@@ -19,9 +19,12 @@ public class ShipmentStatusEvent extends com.flowops.audit.ActorAttributed {
     @Column(name = "created_at", nullable = false) private OffsetDateTime createdAt;
     protected ShipmentStatusEvent() {}
     public ShipmentStatusEvent(UUID tenantId, Shipment shipment, long sequence, UUID requestId, String note) {
+        this(tenantId, shipment, sequence, requestId, note, OffsetDateTime.now(ZoneOffset.UTC));
+    }
+    public ShipmentStatusEvent(UUID tenantId, Shipment shipment, long sequence, UUID requestId, String note, OffsetDateTime at) {
         this.id = UUID.randomUUID(); this.tenantId = tenantId; this.shipmentId = shipment.getId();
         this.sequence = sequence; this.requestId = requestId; this.status = shipment.getStatus(); this.note = note;
-        this.createdAt = OffsetDateTime.now(ZoneOffset.UTC);
+        this.createdAt = java.util.Objects.requireNonNull(at);
     }
     public UUID getId() { return id; }
     public long getSequence() { return sequence; }

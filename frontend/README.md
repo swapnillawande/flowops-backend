@@ -152,3 +152,19 @@ Movement and shipment timelines show the operator name captured with each entry,
 falling back to its immutable subject. Issuer and subject are available as a tooltip. Values render as plain text.
 Historical/non-user entries display **Not recorded**, without inventing an actor.
 Changing an operator's display name does not rewrite past history.
+
+## Hold expiry
+
+Order details display the server-assigned stock hold deadline. New holds default
+to 30 minutes; the backend can configure a different lifetime. Expired orders show
+an **Expired** badge, the expiry time, and that their reserved stock was released.
+Preparation/cancellation controls are not offered for terminal expired orders.
+Create a new order with a new request ID if fulfillment is still needed.
+
+Expiry also cancels a prepared shipment. Its history explains the cause and shows
+**Automatic reservation expiry** as the actor. This changes availability without
+creating a physical stock movement. Legacy holds show **No automatic deadline**.
+
+Refresh to load scheduled changes; this console does not push updates or free stock
+using browser timers. The API rejects late new preparation/dispatch even if the
+screen still shows the last confirmed state while cleanup is pending.

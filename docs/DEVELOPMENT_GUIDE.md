@@ -37,8 +37,8 @@ be held, the whole transaction rolls back, including earlier item changes.
 For standalone reservations, the client reuses a request ID for retries. An identical retry returns the existing
 reservation. Changing the items with that ID returns a conflict. Release locks the
 reservation before returning its units, so two release requests cannot return the
-same hold twice. Standalone holds follow `ACTIVE -> RELEASED`; order-owned holds may instead become
-`CONSUMED` during dispatch. Neither terminal state can be reopened; there is no delete API.
+same hold twice. Standalone holds follow `ACTIVE -> RELEASED` or `ACTIVE -> EXPIRED`; order-owned holds may instead become
+`CONSUMED` during dispatch. No terminal state can be reopened; there is no delete API.
 
 ## Order and inventory integration
 
@@ -149,7 +149,8 @@ messages, a Kafka outbox, or delivery guarantees to another service.
 OIDC authentication and tenant isolation are implemented. Viewers can read; operators can also write. Actor identity is recorded for
 stock movements and shipment history; order/reservation audit history is future work. Standalone reservations
 require explicit release; order-owned holds must be released through order cancellation.
-Expiration, partial release, automatic carrier tracking, and returns remain future work.
+New holds expire automatically; pre-V11 holds retain manual release/cancellation.
+Partial release, automatic carrier tracking, and returns remain future work.
 Full-order shipments and dispatch are implemented; cancelling prepared shipments
 is coordinated through order cancellation. The bundled Keycloak start-dev setup is local infrastructure; production identity
 configuration and TLS must be provisioned before deployment. See the README for runnable API examples and the next milestones.
@@ -248,6 +249,56 @@ JPA, so retries and later state changes preserve the original actor.
 V10 adds nullable fields and a paired-value constraint. Null is honest for pre-V10
 history and unauthenticated internal service work; it does not mean the current
 operator created those rows. Do not add an automatic system fallback that obscures
-who initiated a job. A future background workflow needs an explicit system identity.
+who initiated a job. The reservation-expiry worker now uses an explicit system identity; other background
+workflows still need their own attribution policy.
 Signed-token integration tests cover role enforcement and actor provenance; the
 migration test upgrades an isolated V9 schema without altering existing history.
+
+## Reservation deadlines and cleanup transactions
+
+`ReservationPolicy` validates the lifetime of new holds. ReservationService records
+creation/deadline from an injectable UTC Clock and never changes a persisted
+deadline on retry. OrderService snapshots that deadline with confirmation. V11
+leaves old rows null rather than inventing or backdating a deadline for existing work.
+
+`ReservationExpiryScheduler` starts after the configured interval and calls a
+bounded worker. The candidate scan is read-only and intentionally cross-tenant,
+internal maintenance. Each candidate then passes its persisted tenant, warehouse,
+and ownership IDs to scoped service methods. No public endpoint exposes this scan.
+The scan acquires no write locks and does not claim that its snapshot is current.
+
+Order-owned expiry acquires order → reservation → stocks, then the prepared
+shipment, matching the existing cancellation path. Dispatch takes the shipment lock
+before inventory, but both paths first hold the same order lock, serializing their
+conflicting work. Inventory releases held units, then the order expires and publishes a
+synchronous OrderExpiration event. ShipmentService cancels only a prepared shipment,
+records the event time, and appends system-attributed history in that transaction.
+An audit or state failure rolls everything back. Standalone holds never acquire an
+order lock. Keep that direction: do not lock an order from inventory after first
+locking its reservation. Stock rows retain the existing Java UUID sort order.
+
+Preparation checks the deadline before creating a shipment. Consumption checks it
+after waiting for all stock locks, before any physical deduction. A delayed cleanup
+job therefore cannot authorize late dispatch. Existing successful replays return
+before new-transition validation. Cancellation/release remain valid ways to return
+units even after the deadline if they acquire the lock before expiry.
+
+The coordinator itself is not transactional. Each proxied candidate call owns a
+separate transaction with a 15-second transaction timeout. Stale candidates become
+no-ops after a state recheck. Duplicate processes may scan the same row; row locks
+and terminal states prevent duplicate stock returns. Per-candidate failures are
+logged and retained for retry; bounded batches are not a distributed queue or a
+claim of unlimited throughput. Correct persistent failures to prevent backlog growth.
+
+`SystemActor.reservationExpiry()` wraps the transaction in an explicit thread scope,
+including commit/rollback, and always restores/removes it. It records no fake user
+and is never selectable from HTTP input. Expiry uses no physical stock movement;
+only prepared shipment cancellation gets a durable history entry in the current
+schema. Unprepared orders/standalone expiry have terminal timestamps and committed
+activity logs, without a separate per-operation actor ledger.
+
+Tests disable the scheduler, replace Clock with a controlled clock, and invoke the
+same worker directly. Real PostgreSQL tests cover exact boundaries, tenant scope,
+bounded batches, retries, cancellation/dispatch races, failure isolation, atomic
+rollback, system-actor cleanup, and the V10 upgrade. A separate live QA run checks
+the actual scheduled path and UI on a disposable database.

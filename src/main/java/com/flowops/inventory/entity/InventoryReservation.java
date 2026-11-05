@@ -36,6 +36,11 @@ public class InventoryReservation {
     @Column(name = "released_at")
     private OffsetDateTime releasedAt;
 
+    @Column(name = "expires_at")
+    private OffsetDateTime expiresAt;
+    @Column(name = "expired_at")
+    private OffsetDateTime expiredAt;
+
     protected InventoryReservation() {} // JPA constructs entities when loading database rows.
 
     public InventoryReservation(UUID tenantId, UUID warehouseId, UUID requestId) {
@@ -44,13 +49,20 @@ public class InventoryReservation {
 
     /** An order-owned hold can be released only through the order workflow. */
     public InventoryReservation(UUID tenantId, UUID warehouseId, UUID requestId, UUID ownerOrderId) {
+        this(tenantId, warehouseId, requestId, ownerOrderId, OffsetDateTime.now(ZoneOffset.UTC), null);
+    }
+
+    /** New service-created holds have a fixed deadline; null is reserved for legacy/internal fixtures. */
+    public InventoryReservation(UUID tenantId, UUID warehouseId, UUID requestId, UUID ownerOrderId,
+                                OffsetDateTime createdAt, OffsetDateTime expiresAt) {
         this.ownerOrderId = ownerOrderId;
         this.id = UUID.randomUUID();
         this.tenantId = tenantId;
         this.warehouseId = warehouseId;
         this.requestId = requestId;
         this.status = "ACTIVE";
-        this.createdAt = OffsetDateTime.now(ZoneOffset.UTC);
+        this.createdAt = createdAt;
+        this.expiresAt = expiresAt;
     }
 
     /** Called only while holding the reservation lock, after all held units are returned. */
@@ -69,6 +81,18 @@ public class InventoryReservation {
         consumedAt = OffsetDateTime.now(ZoneOffset.UTC);
         consumedShipmentId = shipmentId;
     }
+    public boolean isDue(OffsetDateTime now) {
+        return isActive() && expiresAt != null && !expiresAt.isAfter(now);
+    }
+
+    /** Only the locked expiry workflow may return units and apply this terminal state. */
+    public void expire(OffsetDateTime now) {
+        if (!isDue(now)) throw new ReservationConflictException("Only overdue active holds can expire");
+        status = "EXPIRED";
+        expiredAt = now;
+    }
+    public OffsetDateTime getExpiresAt() { return expiresAt; }
+    public OffsetDateTime getExpiredAt() { return expiredAt; }
     public OffsetDateTime getConsumedAt() { return consumedAt; }
     public UUID getConsumedShipmentId() { return consumedShipmentId; }
     public boolean isActive() { return "ACTIVE".equals(status); }

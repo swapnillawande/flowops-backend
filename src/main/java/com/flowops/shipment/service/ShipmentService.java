@@ -1,6 +1,7 @@
 package com.flowops.shipment.service;
 
 import com.flowops.order.event.OrderCancellation;
+import com.flowops.order.event.OrderExpiration;
 import com.flowops.order.service.OrderService;
 import com.flowops.shipment.dto.CreateShipmentRequest;
 import com.flowops.shipment.dto.UpdateShipmentStatusRequest;
@@ -23,6 +24,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -61,6 +64,7 @@ public class ShipmentService {
         if (!"CONFIRMED".equals(order.status())) {
             throw new ShipmentConflictException("Only confirmed orders can have a new shipment");
         }
+        orders.requireUsableHold(tenantId, order.id());
         var shipment = shipments.save(new Shipment(tenantId, order.id(), order.warehouseId(), request.carrier()));
         record(tenantId, shipment, null, "Shipment prepared");
         events.publishEvent(new ShipmentActivity("SHIPMENT_PREPARED", tenantId, shipment.getId(), order.id()));
@@ -94,15 +98,25 @@ public class ShipmentService {
     @EventListener
     @Transactional(propagation = Propagation.MANDATORY)
     public void cancelPreparedShipment(OrderCancellation cancellation) {
-        var existing = shipments.findOrderForUpdate(cancellation.orderId(), cancellation.tenantId());
+        cancelPrepared(cancellation.tenantId(), cancellation.orderId(), "Order cancelled before dispatch", OffsetDateTime.now(ZoneOffset.UTC));
+    }
+
+    @EventListener
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void cancelExpiredShipment(OrderExpiration expiration) {
+        cancelPrepared(expiration.tenantId(), expiration.orderId(), "Reservation expired before dispatch", expiration.occurredAt());
+    }
+
+    private void cancelPrepared(UUID tenantId, UUID orderId, String note, OffsetDateTime at) {
+        var existing = shipments.findOrderForUpdate(orderId, tenantId);
         if (existing.isEmpty() || "CANCELLED".equals(existing.get().getStatus())) return;
         var shipment = existing.get();
         if (!"PREPARED".equals(shipment.getStatus())) {
             throw new ShipmentConflictException("Dispatched shipments cannot be cancelled");
         }
-        shipment.cancel();
-        record(cancellation.tenantId(), shipment, null, "Order cancelled before dispatch");
-        events.publishEvent(new ShipmentActivity("SHIPMENT_CANCELLED", cancellation.tenantId(), shipment.getId(), shipment.getOrderId()));
+        shipment.cancel(at);
+        record(tenantId, shipment, null, note, at);
+        events.publishEvent(new ShipmentActivity("SHIPMENT_CANCELLED", tenantId, shipment.getId(), shipment.getOrderId()));
     }
 
     /** Lock order first, then shipment. Retried transitions return their original event even after later progress. */
@@ -136,8 +150,12 @@ public class ShipmentService {
     }
 
     private ShipmentStatusEvent record(UUID tenantId, Shipment shipment, UUID requestId, String note) {
+        return record(tenantId, shipment, requestId, note, OffsetDateTime.now(ZoneOffset.UTC));
+    }
+
+    private ShipmentStatusEvent record(UUID tenantId, Shipment shipment, UUID requestId, String note, OffsetDateTime at) {
         return history.save(new ShipmentStatusEvent(tenantId, shipment,
-                history.lastSequence(tenantId, shipment.getId()) + 1, requestId, note));
+                history.lastSequence(tenantId, shipment.getId()) + 1, requestId, note, at));
     }
 
     @Transactional(readOnly = true)

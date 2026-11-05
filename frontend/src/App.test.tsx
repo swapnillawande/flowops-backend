@@ -196,3 +196,37 @@ describe("Viewer permissions", () => {
     expect(post).not.toHaveBeenCalled();
   });
 });
+
+it("labels expired orders as released and does not offer preparation or cancellation", async () => {
+  vi.mocked(api).mockImplementation(async (path) => {
+    if (path.startsWith("/orders"))
+      return {
+        content: [
+          {
+            id: "expired-order",
+            customerReference: "Expired customer",
+            warehouseId: warehouse.id,
+            status: "EXPIRED",
+            createdAt: "2026-11-05T10:00:00Z",
+            items: [],
+          },
+        ],
+        totalElements: 1,
+        totalPages: 1,
+      } as never;
+    if (path.startsWith("/shipments"))
+      return { content: [], totalElements: 0, totalPages: 0 } as never;
+    if (path === "/warehouses") return [warehouse] as never;
+    return [product] as never;
+  });
+  render(<App />);
+  expect(
+    await screen.findByText("Hold expired · stock released"),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Prepare shipment" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Cancel" }),
+  ).not.toBeInTheDocument();
+});

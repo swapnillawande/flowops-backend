@@ -61,6 +61,20 @@ export function OrderDetails({
           <dd>{date(order.createdAt)}</dd>
         </div>
         <div>
+          <dt>Stock hold deadline</dt>
+          <dd>
+            {order.reservationExpiresAt
+              ? date(order.reservationExpiresAt)
+              : "No automatic deadline (legacy hold)"}
+          </dd>
+        </div>
+        {order.expiredAt && (
+          <div>
+            <dt>Expired</dt>
+            <dd>{date(order.expiredAt)}</dd>
+          </div>
+        )}
+        <div>
           <dt>Reservation ID</dt>
           <dd>{order.reservationId}</dd>
         </div>
@@ -87,6 +101,12 @@ export function OrderDetails({
           </div>
         )}
       </dl>
+      {order.status === "EXPIRED" && (
+        <p className="notice" role="status">
+          The stock hold expired and its reserved units were released. Create a
+          new order if fulfillment is still needed.
+        </p>
+      )}
       <h3>Ordered products</h3>
       <p className="help">
         Original catalog snapshots, preserved even if a product is renamed

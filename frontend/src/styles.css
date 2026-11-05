@@ -1356,3 +1356,11 @@ label small {
 .inventory-readonly {
   padding: 0 24px 24px;
 }
+
+.badge.expired {
+  background: #fff0d8;
+  color: #86570c;
+}
+.badge.expired i {
+  background: #b47c24;
+}
